@@ -1,0 +1,23 @@
+{
+    "ssid": "Your_SSID_Here",
+    "network_type": 2,
+    "bssid": null,
+    "wpa3": false,
+    "eap_method": "PEAP",
+    "username": "username_here",
+    "password_encrypted": "encrypted_password_here",
+    "password_hash": "hash_of_password_here",
+    "identity": "portalbox",
+    "psk_encrypted": null,
+    "psk_hash": null,
+    "ca_cert_file": "ca-cert.pem",
+    "client_cert_file": null,
+    "private_key_file": null,
+    "private_key_password_hash": null,
+    "ttls_phase2_method": 1,
+    "disable_time_check": false,
+    "timeout": 30,
+    "retry_attempts": 3,
+    "retry_delay": 5,
+    "auto_connect": true
+}
