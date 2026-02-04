@@ -9,6 +9,11 @@ import ujson as json
 import machine
 import sys
 from micropython import const
+try:
+    import ucryptolib
+    CRYPTO_AVAILABLE = True
+except ImportError:
+    CRYPTO_AVAILABLE = False
 
 
 # Network status codes
@@ -53,6 +58,8 @@ class WiFiConfig:
     """WiFi configuration with secure credential storage."""
 
     CONFIG_FILE = '/config/wifi_config.json'
+    # Default encryption key (device-specific MAC-based key should be used in production)
+    ENCRYPTION_KEY = b'portalbox_secret'
 
     def __init__(self):
         """Initialize WiFi configuration."""
@@ -61,12 +68,14 @@ class WiFiConfig:
         self.bssid = None  # Optional: Restrict to specific AP
 
         # WPA2/3-PSK credentials
+        self.psk_encrypted = None  # Encrypted PSK password
         self.psk_hash = None
         self.wpa3 = False  # Enforce WPA3 
 
         # WPA2 Enterprise fields
         self.eap_method = None
         self.username = None
+        self.password_encrypted = None  # Encrypted enterprise password
         self.password_hash = None
         self.identity = None
 
@@ -149,7 +158,7 @@ class WiFiConfig:
         Args:
             ssid: Network SSID
             username: Network username
-            password: Network password (will be hashed)
+            password: Network password (will be encrypted and hashed)
             identity: Anonymous identity (optional)
             ca_cert_file: Path to CA certificate file
         """
@@ -157,6 +166,7 @@ class WiFiConfig:
         self.network_type = NetworkType.WPA2_ENTERPRISE
         self.eap_method = EAPMethod.PEAP
         self.username = username
+        self.password_encrypted = self._encrypt_password(password)
         self.password_hash = self._hash_password(password)
         self.identity = identity or username
         self.ca_cert_file = ca_cert_file
@@ -233,6 +243,118 @@ class WiFiConfig:
         hasher.update(password.encode('utf-8'))
         return ubinascii.hexlify(hasher.digest()).decode()
 
+    def _get_encryption_key(self):
+        """
+        Get encryption key (padded to 16 bytes for AES-128).
+        
+        Returns:
+            bytes: 16-byte encryption key
+        """
+        key = self.ENCRYPTION_KEY[:16]
+        if len(key) < 16:
+            key = key + b'\x00' * (16 - len(key))
+        return key
+
+    def _encrypt_password(self, password):
+        """
+        Encrypt password using AES-128 CBC.
+        
+        Args:
+            password (str): Plaintext password
+            
+        Returns:
+            str: Hex-encoded encrypted password (IV + ciphertext)
+        """
+        if not CRYPTO_AVAILABLE:
+            print("[CONFIG] WARNING: Crypto not available, storing as base64")
+            # Fallback to base64 encoding (not secure, but functional)
+            return ubinascii.b2a_base64(password.encode('utf-8')).decode().strip()
+        
+        try:
+            # Generate IV (using simple method for MicroPython)
+            import urandom
+            iv = urandom.getrandbits(128).to_bytes(16, 'big')
+        except:
+            # Fallback IV if urandom not available
+            iv = uhashlib.sha256(str(time.ticks_us()).encode()).digest()[:16]
+        
+        # Pad password to multiple of 16 bytes (PKCS7 padding)
+        password_bytes = password.encode('utf-8')
+        pad_len = 16 - (len(password_bytes) % 16)
+        padded = password_bytes + bytes([pad_len] * pad_len)
+        
+        # Encrypt
+        key = self._get_encryption_key()
+        cipher = ucryptolib.aes(key, 2, iv)  # Mode 2 = CBC
+        encrypted = cipher.encrypt(padded)
+        
+        # Return IV + encrypted data as hex
+        return ubinascii.hexlify(iv + encrypted).decode()
+
+    def _decrypt_password(self, encrypted_hex):
+        """
+        Decrypt password using AES-128 CBC or base64.
+        
+        Args:
+            encrypted_hex (str): Hex-encoded encrypted password or base64
+            
+        Returns:
+            str: Plaintext password or None on error
+        """
+        if not encrypted_hex:
+            return None
+        
+        # First, try to detect if it's base64 (contains non-hex characters like = or +)
+        is_base64 = any(c in encrypted_hex for c in ['+', '/', '=']) or not all(c in '0123456789abcdefABCDEF' for c in encrypted_hex)
+        
+        if is_base64:
+            # Decode from base64 (fallback encoding)
+            try:
+                return ubinascii.a2b_base64(encrypted_hex).decode('utf-8')
+            except Exception as e:
+                print(f"[CONFIG] Base64 decode error: {e}")
+                return None
+        
+        # Try AES decryption (hex-encoded)
+        if not CRYPTO_AVAILABLE:
+            print("[CONFIG] WARNING: Crypto not available, but data is hex-encoded")
+            return None
+        
+        try:
+            # Decode hex
+            encrypted_data = ubinascii.unhexlify(encrypted_hex)
+            
+            # Extract IV and ciphertext
+            iv = encrypted_data[:16]
+            ciphertext = encrypted_data[16:]
+            
+            # Decrypt
+            key = self._get_encryption_key()
+            cipher = ucryptolib.aes(key, 2, iv)  # Mode 2 = CBC
+            decrypted = cipher.decrypt(ciphertext)
+            
+            # Remove PKCS7 padding
+            pad_len = decrypted[-1]
+            password_bytes = decrypted[:-pad_len]
+            
+            return password_bytes.decode('utf-8')
+        except Exception as e:
+            print(f"[CONFIG] AES decryption error: {e}")
+            return None
+
+    def get_decrypted_password(self):
+        """
+        Get decrypted password for connection.
+        
+        Returns:
+            str: Plaintext password or None if not available
+        """
+        if self.network_type in [NetworkType.WPA2_PSK, NetworkType.WPA3_PSK]:
+            return self._decrypt_password(self.psk_encrypted)
+        elif self.network_type == NetworkType.WPA2_ENTERPRISE:
+            return self._decrypt_password(self.password_encrypted)
+        return None
+
     def verify_password(self, password, password_type='main'):
         """
         Verify password against stored hash.
@@ -264,8 +386,10 @@ class WiFiConfig:
                 'wpa3': self.wpa3,
                 'eap_method': self.eap_method,
                 'username': self.username,
+                'password_encrypted': self.password_encrypted,
                 'password_hash': self.password_hash,
                 'identity': self.identity,
+                'psk_encrypted': self.psk_encrypted,
                 'psk_hash': self.psk_hash,
                 'ca_cert_file': self.ca_cert_file,
                 'client_cert_file': self.client_cert_file,
@@ -308,8 +432,10 @@ class WiFiConfig:
             self.wpa3 = config_data.get('wpa3', False)
             self.eap_method = config_data.get('eap_method')
             self.username = config_data.get('username')
+            self.password_encrypted = config_data.get('password_encrypted')
             self.password_hash = config_data.get('password_hash')
             self.identity = config_data.get('identity')
+            self.psk_encrypted = config_data.get('psk_encrypted')
             self.psk_hash = config_data.get('psk_hash')
             self.ca_cert_file = config_data.get('ca_cert_file')
             self.client_cert_file = config_data.get('client_cert_file')
@@ -377,17 +503,20 @@ class WifiManager:
         # Create interface
         self.nic = network.WLAN(network.WLAN.IF_STA)
         
-        # Reset interface
+        # Reset interface (needs full seconds for proper reset)
+        self._log("[WiFi] Deactivating interface...")
         self.nic.active(False)
-        time.sleep_ms(100)
+        time.sleep(1)
+        
+        self._log("[WiFi] Activating interface...")
         self.nic.active(True)
-        time.sleep_ms(100)
+        time.sleep(1)
 
         # Disconnect if already connected
         if self.nic.isconnected():
             self._log("[WiFi] Disconnecting existing connection...")
             self.nic.disconnect()
-            time.sleep_ms(100)
+            time.sleep(2)
 
         # Display MAC address
         mac = ubinascii.hexlify(self.nic.config('mac')).decode()
@@ -494,7 +623,6 @@ class WifiManager:
         
         try:
             connect_params = {
-                'ssid': self.config.ssid,
                 'eap_method': network.WLAN.EAP_PWD,
                 'username': self.config.username,
                 'password': password
@@ -505,7 +633,7 @@ class WifiManager:
                 connect_params['bssid'] = self.config.bssid
                 self._log(f"[WiFi] Restricting to BSSID: {self.config.bssid}")
             
-            self.nic.connect(**connect_params)
+            self.nic.connect(self.config.ssid, **connect_params)
             self._log("[WiFi] Connection initiated")
             return True
             
@@ -540,8 +668,8 @@ class WifiManager:
         self._log(f"[WiFi] Identity: {self.config.identity}")
         
         try:
+            # Build connection parameters
             connect_params = {
-                'ssid': self.config.ssid,
                 'eap_method': network.WLAN.EAP_PEAP,
                 'username': self.config.username,
                 'password': password,
@@ -552,6 +680,9 @@ class WifiManager:
             # Add optional BSSID
             if self.config.bssid:
                 connect_params['bssid'] = self.config.bssid
+            
+            # Connect with SSID as positional argument
+            self.nic.connect(self.config.ssid, **connect_params)
             
             self.nic.connect(**connect_params)
             self._log("[WiFi] Connection initiated")
@@ -590,7 +721,6 @@ class WifiManager:
         
         try:
             connect_params = {
-                'ssid': self.config.ssid,
                 'eap_method': network.WLAN.EAP_TTLS,
                 'username': self.config.username,
                 'password': password,
@@ -603,7 +733,7 @@ class WifiManager:
             if self.config.bssid:
                 connect_params['bssid'] = self.config.bssid
             
-            self.nic.connect(**connect_params)
+            self.nic.connect(self.config.ssid, **connect_params)
             self._log("[WiFi] Connection initiated")
             return True
             
@@ -657,7 +787,6 @@ class WifiManager:
         
         try:
             connect_params = {
-                'ssid': self.config.ssid,
                 'eap_method': network.WLAN.EAP_TLS,
                 'client_cert': client_cert,
                 'private_key': private_key,
@@ -672,7 +801,7 @@ class WifiManager:
             if self.config.bssid:
                 connect_params['bssid'] = self.config.bssid
             
-            self.nic.connect(**connect_params)
+            self.nic.connect(self.config.ssid, **connect_params)
             self._log("[WiFi] Connection initiated")
             return True
             
@@ -703,7 +832,6 @@ class WifiManager:
         
         try:
             connect_params = {
-                'ssid': self.config.ssid,
                 'key': password
             }
             
@@ -717,7 +845,7 @@ class WifiManager:
                 connect_params['wpa3'] = True
                 self._log("[WiFi] Enforcing WPA3 authentication")
             
-            self.nic.connect(**connect_params)
+            self.nic.connect(self.config.ssid, **connect_params)
             self._log("[WiFi] Connection initiated")
             return True
             
@@ -783,13 +911,14 @@ class WifiManager:
         
         return True
 
-    def connect(self, password, private_key_password=None):
+    def connect(self, password, private_key_password=None, skip_init=False):
         """
         Connect to configured network.
         
         Args:
             password: Plain text password (for PSK/Enterprise)
             private_key_password: Plain text private key password (for EAP-TLS only)
+            skip_init: Skip interface initialization (for retries)
             
         Returns:
             bool: True if connected successfully
@@ -805,9 +934,10 @@ class WifiManager:
             self.last_error = "No network type configured"
             return False
         
-        # Initialize interface
-        if not self._init_interface():
-            return False
+        # Initialize interface (only on first attempt)
+        if not skip_init:
+            if not self._init_interface():
+                return False
         
         # Connect based on network type
         if self.config.network_type == NetworkType.WPA2_ENTERPRISE:
@@ -837,10 +967,15 @@ class WifiManager:
         Returns:
             bool: True if connected successfully
         """
+        # Initialize interface once before all attempts
+        if not self._init_interface():
+            return False
+        
         for attempt in range(self.config.retry_attempts):
             self._log(f"[WiFi] Attempt {attempt + 1}/{self.config.retry_attempts}")
             
-            if self.connect(password, private_key_password):
+            # Skip init on all attempts (already initialized above)
+            if self.connect(password, private_key_password, skip_init=True):
                 return True
             
             if attempt < self.config.retry_attempts - 1:
