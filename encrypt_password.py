@@ -17,8 +17,8 @@ except ImportError:
         CRYPTO_AVAILABLE = False
 
 # Configuration
-PASSWORD = "password123"  # Replace with the password to encrypt
-ENCRYPTION_KEY = b'my_secret_key_123'  # Must be 16, 24, or 32 bytes for AES
+PASSWORD = "X638L4Wp"  # Replace with the password to encrypt
+ENCRYPTION_KEY = b'portalbox_secret'  # Must be 16, 24, or 32 bytes for AES
 
 def get_encryption_key():
     """Get encryption key (padded to 16 bytes for AES-128)"""
