@@ -521,6 +521,7 @@ class WifiManager:
         # Display MAC address
         mac = ubinascii.hexlify(self.nic.config('mac')).decode()
         self._log(f"[WiFi] MAC Address: {mac}")
+        time.sleep(3)
         
         return True
 
