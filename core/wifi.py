@@ -9,22 +9,12 @@ import ujson as json
 import machine
 import sys
 from micropython import const
+
 try:
     import ucryptolib
     CRYPTO_AVAILABLE = True
 except ImportError:
     CRYPTO_AVAILABLE = False
-
-
-# Network status codes
-class NetworkStatus:
-    """Network connection status codes."""
-    IDLE = const(1000)
-    CONNECTING = const(1001)
-    WRONG_PASSWORD = const(1002)
-    NO_AP_FOUND = const(1003)
-    CONNECT_FAIL = const(1004)
-    GOT_IP = const(1010)
 
 
 # Network types
@@ -53,13 +43,20 @@ class TTLSPhase2:
     PAP = const(3)        # PAP
     CHAP = const(4)       # CHAP (has security issues)
 
+# Network connection status codes (used by network.WLAN.status())
+class NetworkStatus:
+    IDLE = const(0)
+    CONNECTING = const(1)
+    WRONG_PASSWORD = const(-3)
+    NO_AP_FOUND = const(-2)
+    CONNECT_FAIL = const(-1)
+    GOT_IP = const(3)
+
 
 class WiFiConfig:
     """WiFi configuration with secure credential storage."""
 
     CONFIG_FILE = '/config/wifi_config.json'
-    # Default encryption key (device-specific MAC-based key should be used in production)
-    ENCRYPTION_KEY = b'portalbox_secret'
 
     def __init__(self):
         """Initialize WiFi configuration."""
@@ -87,16 +84,12 @@ class WiFiConfig:
 
         # TTLS-specific
         self.ttls_phase2_method = TTLSPhase2.MSCHAPV2
-
-        # TLS-specific
         self.disable_time_check = False
 
         # Connection settings
         self.timeout = 30  # seconds
         self.retry_attempts = 3
         self.retry_delay = 5  # seconds
-
-        # Auto-connect
         self.auto_connect = True
 
     def set_wpa2_psk(self, ssid, password, bssid=None):
@@ -111,6 +104,7 @@ class WiFiConfig:
         self.ssid = ssid
         self.network_type = NetworkType.WPA2_PSK
         self.psk_hash = self._hash_password(password)
+        self.psk_encrypted = self._encrypt_password(password)
         self.bssid = bssid
         self.wpa3 = False
         
@@ -128,6 +122,7 @@ class WiFiConfig:
         self.ssid = ssid
         self.network_type = NetworkType.WPA3_PSK
         self.psk_hash = self._hash_password(password)
+        self.psk_encrypted = self._encrypt_password(password)
         self.bssid = bssid
         self.wpa3 = True
         
@@ -147,6 +142,7 @@ class WiFiConfig:
         self.eap_method = EAPMethod.PWD
         self.username = username
         self.password_hash = self._hash_password(password)
+        self.password_encrypted = self._encrypt_password(password)
         
         print(f"[CONFIG] EAP-PWD configured for SSID: {ssid}")
     
@@ -191,6 +187,7 @@ class WiFiConfig:
         self.network_type = NetworkType.WPA2_ENTERPRISE
         self.eap_method = EAPMethod.TTLS
         self.username = username
+        self.password_encrypted = self._encrypt_password(password)
         self.password_hash = self._hash_password(password)
         self.identity = identity or username
         self.ca_cert_file = ca_cert_file
@@ -250,10 +247,10 @@ class WiFiConfig:
         Returns:
             bytes: 16-byte encryption key
         """
-        key = self.ENCRYPTION_KEY[:16]
-        if len(key) < 16:
-            key = key + b'\x00' * (16 - len(key))
-        return key
+        uid = machine.unique_id()
+        hasher = uhashlib.sha256()
+        hasher.update(uid)
+        return hasher.digest()[:16]  # Use first 16 bytes for AES-128 key
 
     def _encrypt_password(self, password):
         """
@@ -291,6 +288,13 @@ class WiFiConfig:
         # Return IV + encrypted data as hex
         return ubinascii.hexlify(iv + encrypted).decode()
 
+    def _is_hex(self, s):
+        try:
+            ubinascii.unhexlify(s)
+            return True
+        except:
+            return False
+
     def _decrypt_password(self, encrypted_hex):
         """
         Decrypt password using AES-128 CBC or base64.
@@ -304,10 +308,7 @@ class WiFiConfig:
         if not encrypted_hex:
             return None
         
-        # First, try to detect if it's base64 (contains non-hex characters like = or +)
-        is_base64 = any(c in encrypted_hex for c in ['+', '/', '=']) or not all(c in '0123456789abcdefABCDEF' for c in encrypted_hex)
-        
-        if is_base64:
+        if not self._is_hex(encrypted_hex):
             # Decode from base64 (fallback encoding)
             try:
                 return ubinascii.a2b_base64(encrypted_hex).decode('utf-8')
@@ -379,80 +380,29 @@ class WiFiConfig:
     def save(self):
         """Save configuration to file."""
         try:
-            config_data = {
-                'ssid': self.ssid,
-                'network_type': self.network_type,
-                'bssid': self.bssid,
-                'wpa3': self.wpa3,
-                'eap_method': self.eap_method,
-                'username': self.username,
-                'password_encrypted': self.password_encrypted,
-                'password_hash': self.password_hash,
-                'identity': self.identity,
-                'psk_encrypted': self.psk_encrypted,
-                'psk_hash': self.psk_hash,
-                'ca_cert_file': self.ca_cert_file,
-                'client_cert_file': self.client_cert_file,
-                'private_key_file': self.private_key_file,
-                'private_key_password_hash': self.private_key_password_hash,
-                'ttls_phase2_method': self.ttls_phase2_method,
-                'disable_time_check': self.disable_time_check,
-                'timeout': self.timeout,
-                'retry_attempts': self.retry_attempts,
-                'retry_delay': self.retry_delay,
-                'auto_connect': self.auto_connect
-            }
-            
-            # Ensure config directory exists
+            import os
             try:
-                import os
                 os.mkdir('/config')
-            except OSError:
-                pass  # Directory exists
-            
+            except:
+                pass
+
             with open(self.CONFIG_FILE, 'w') as f:
-                json.dump(config_data, f)
-            
-            print(f"[CONFIG] Saved to {self.CONFIG_FILE}")
+                json.dump(self.__dict__, f)
+
             return True
-            
         except Exception as e:
-            print(f"[CONFIG] Error saving: {e}")
+            print("Save error:", e)
             return False
 
     def load(self):
-        """Load configuration from file."""
         try:
             with open(self.CONFIG_FILE, 'r') as f:
-                config_data = json.load(f)
-            
-            self.ssid = config_data.get('ssid')
-            self.network_type = config_data.get('network_type')
-            self.bssid = config_data.get('bssid')
-            self.wpa3 = config_data.get('wpa3', False)
-            self.eap_method = config_data.get('eap_method')
-            self.username = config_data.get('username')
-            self.password_encrypted = config_data.get('password_encrypted')
-            self.password_hash = config_data.get('password_hash')
-            self.identity = config_data.get('identity')
-            self.psk_encrypted = config_data.get('psk_encrypted')
-            self.psk_hash = config_data.get('psk_hash')
-            self.ca_cert_file = config_data.get('ca_cert_file')
-            self.client_cert_file = config_data.get('client_cert_file')
-            self.private_key_file = config_data.get('private_key_file')
-            self.private_key_password_hash = config_data.get('private_key_password_hash')
-            self.ttls_phase2_method = config_data.get('ttls_phase2_method', TTLSPhase2.MSCHAPV2)
-            self.disable_time_check = config_data.get('disable_time_check', False)
-            self.timeout = config_data.get('timeout', 30)
-            self.retry_attempts = config_data.get('retry_attempts', 3)
-            self.retry_delay = config_data.get('retry_delay', 5)
-            self.auto_connect = config_data.get('auto_connect', True)
-            
-            print(f"[CONFIG] Loaded from {self.CONFIG_FILE}")
+                data = json.load(f)
+
+            self.__dict__.update(data)
             return True
-            
         except Exception as e:
-            print(f"[CONFIG] Error loading: {e}")
+            print("Load error:", e)
             return False
 
     def clear(self):
@@ -485,9 +435,9 @@ class WifiManager:
         self.config = config or WiFiConfig()
         self.verbose = verbose
         self.nic = None
+        self.last_error = None
         self.connected = False
         self.connection_time = None
-        self.last_error = None
         
         print("[WiFi] Manager initialized")
 
@@ -512,17 +462,6 @@ class WifiManager:
         self.nic.active(True)
         time.sleep(1)
 
-        # Disconnect if already connected
-        if self.nic.isconnected():
-            self._log("[WiFi] Disconnecting existing connection...")
-            self.nic.disconnect()
-            time.sleep(2)
-
-        # Display MAC address
-        mac = ubinascii.hexlify(self.nic.config('mac')).decode()
-        self._log(f"[WiFi] MAC Address: {mac}")
-        time.sleep(3)
-        
         return True
 
     # def _set_time_from_ntp(self):
@@ -535,19 +474,14 @@ class WifiManager:
     #     except Exception as e:
     #         self._log(f"[WiFi] NTP sync failed: {e}")
 
-    def _set_time_from_build(self):
-        """Set RTC time from build date (workaround)."""
+    def _sync_time(self):
+        """Set RTC time from build date."""
         try:
-            version_parts = sys.version.split(" on ")
-            if len(version_parts) > 1:
-                date_str = version_parts[1]
-                year, month, day = date_str.split("-")
-                rtc = machine.RTC()
-                date_time = (int(year), int(month), int(day), 0, 12, 0, 0, 0)
-                rtc.init(date_time)
-                self._log(f"[WiFi] RTC set to: {year}-{month}-{day} 12:00:00")
+            import ntptime
+            ntptime.settime()
+            self._log("[WiFi] Time synchronized with NTP")
         except Exception as e:
-            self._log(f"[WiFi] Warning: Could not set RTC time: {e}")
+            self._log(f"[WiFi] NTP sync failed: {e}")
 
     def _load_ca_cert(self):
         """
@@ -583,7 +517,7 @@ class WifiManager:
         """
 
         # Set time for certificate validation
-        self._set_time_from_build()
+        self._sync_time()
         
         # Route to appropriate EAP method
         if self.config.eap_method == EAPMethod.PWD:
@@ -684,8 +618,7 @@ class WifiManager:
             
             # Connect with SSID as positional argument
             self.nic.connect(self.config.ssid, **connect_params)
-            
-            self.nic.connect(**connect_params)
+
             self._log("[WiFi] Connection initiated")
             return True
             
