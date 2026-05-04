@@ -64,13 +64,15 @@ def encrypt_password(password: str) -> bytes:
         bytes: The encrypted password, or Base64-encoded string if encryption is not available
     """
     if not CRYPTO_AVAILABLE:
-        print("[CRYPTO] AES encryption not available, falling back to Base64 encoding")
         return ubinascii.b2a_base64(password.encode('utf-8')).decode().strip()
 
     try:
         import urandom
-        iv = urandom.getrandbits(128).to_bytes(16, 'big')
-    except ImportError:
+        # generate 128 bits (16 bytes) in 32-bit chunks
+        iv = b''
+        for _ in range(4):
+            iv += urandom.getrandbits(32).to_bytes(4, 'big')
+    except (ImportError, AttributeError, ValueError):
         iv = uhashlib.sha256(str(time.ticks_us()).encode()).digest()[:16]
 
     password_bytes = password.encode('utf-8')
@@ -79,8 +81,9 @@ def encrypt_password(password: str) -> bytes:
     padding_length = 16 - (len(password_bytes) % 16)
     padded = password_bytes + bytes([padding_length] * padding_length)
 
+    # Mode 2 = AES-128 CBC
     cipher = ucryptolib.aes(get_encryption_key(), 2, iv)  # AES-128 CBC
-    encrypted = iv + cipher.encrypt(padded)
+    encrypted = cipher.encrypt(padded)
     return ubinascii.hexlify(iv + encrypted).decode()
 
 def decrypt_password(encrypted: str) -> str:
