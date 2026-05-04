@@ -1,6 +1,7 @@
 # Secrets - NEVER commit credentials!
 secrets.py
 wifi_config.json
+ca-cert.pem
 
 # Python cache
 __pycache__/
