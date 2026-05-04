@@ -428,6 +428,8 @@ class WifiManager:
         status_names = {
             NetworkStatus.IDLE: 'IDLE',
             NetworkStatus.CONNECTING: 'CONNECTING',
+            1000: 'CONNECTING',
+            1001: 'CONNECTING',
             NetworkStatus.WRONG_PASSWORD: 'WRONG_PASSWORD',
             NetworkStatus.NO_AP_FOUND: 'NO_AP_FOUND',
             NetworkStatus.CONNECT_FAIL: 'CONNECT_FAIL',
