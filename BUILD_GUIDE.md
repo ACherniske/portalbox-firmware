@@ -91,8 +91,10 @@ ls mpy-cross/build/mpy-cross
 ```
 
 ## Step 5: Configure ESP-IDF
-
 ```bash
+# Enter the esp32 port folder
+cd ports/esp32
+
 # Set target board for esp-idf
 idf.py set-target esp32s3
 
