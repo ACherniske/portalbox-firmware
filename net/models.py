@@ -106,27 +106,23 @@ class WiFiConfig:
     def save(self):
             """Save configuration to JSON file."""
             import os
-            import machine
             try:
+                # Filter __dict__ to only include basic types (strings, ints, bools, None)
+                # This prevents trying to save modules or methods
+                clean_data = {k: v for k, v in self.__dict__.items() 
+                             if isinstance(v, (str, int, float, bool, list, dict)) or v is None}
+
                 filename = self.CONFIG_FILE
-                # Ensure path starts with /
                 if not filename.startswith('/'):
                     filename = '/' + filename
 
-                # Convert dict to string first to ensure no JSON errors during write
-                json_str = json.dumps(self.__dict__)
-
-                # Open, write, flush, and sync
                 with open(filename, 'w') as f:
-                    f.write(json_str)
+                    json.dump(clean_data, f) # Save the filtered dict
                     f.flush()
-                    try:
-                        os.sync() # Commits buffers to hardware
-                    except:
-                        pass
+                    try: os.sync()
+                    except: pass
                 
-                # Print for debugging to the console
-                print(f"[Config] Successfully wrote {len(json_str)} bytes to {filename}")
+                print(f"[Config] Successfully wrote {filename}")
                 return True
             except Exception as e:
                 print(f"[Config] Save failed: {e}")
@@ -135,10 +131,13 @@ class WiFiConfig:
     def load(self):
         """Load configuration from JSON file."""
         try:
-            with open(self.CONFIG_FILE, 'r') as f:
+            filename = self.CONFIG_FILE
+            with open(filename, 'r') as f:
                 data = json.load(f)
-                self.__dict__.update(data)
+                # Update only the attributes that exist in the JSON
+                for key, value in data.items():
+                    setattr(self, key, value)
             return True
         except Exception as e:
-            print(f"[Config] Load failed: {e}")
+            print(f"[Config] Load failed: {e}") # This will now likely show a JSON error
             return False
