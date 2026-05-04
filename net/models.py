@@ -69,12 +69,23 @@ class WiFiConfig:
         self.timeout = 30
         self.retry_attempts = 3
         self.retry_delay = 5
+        self.auto_connect = True
 
     def set_wpa2_psk(self, ssid, password, bssid=None):
-        """Configure for standard WPA2/WPA3 PSK."""
+        """Configure for standard WPA2 PSK."""
         self.ssid = ssid
         self.network_type = NetworkType.WPA2_PSK
         self.bssid = bssid
+        self.wpa3 = False
+        self.psk_hash = crypto.hash_password(password)
+        self.psk_encrypted = crypto.encrypt_password(password)
+
+    def set_wpa3_psk(self, ssid, password, bssid=None):
+        """Configure for WPA3 PSK."""
+        self.ssid = ssid
+        self.network_type = NetworkType.WPA3_PSK
+        self.bssid = bssid
+        self.wpa3 = True
         self.psk_hash = crypto.hash_password(password)
         self.psk_encrypted = crypto.encrypt_password(password)
 
@@ -86,6 +97,34 @@ class WiFiConfig:
         self.eap_method = eap_method
         self.password_hash = crypto.hash_password(password)
         self.password_encrypted = crypto.encrypt_password(password)
+
+    def set_eap_pwd(self, ssid, username, password):
+        """Configure EAP-PWD."""
+        self.set_wpa2_enterprise(ssid, username, password, eap_method=EAPMethod.PWD)
+
+    def set_eap_peap(self, ssid, username, password, identity=None, ca_cert_file='ca-cert.pem'):
+        """Configure EAP-PEAP."""
+        self.set_wpa2_enterprise(ssid, username, password, eap_method=EAPMethod.PEAP)
+        self.identity = identity or username
+        self.ca_cert_file = ca_cert_file
+
+    def set_eap_ttls(self, ssid, username, password, identity=None, ca_cert_file='ca-cert.pem', phase2_method=TTLSPhase2.MSCHAPV2):
+        """Configure EAP-TTLS."""
+        self.set_wpa2_enterprise(ssid, username, password, eap_method=EAPMethod.TTLS)
+        self.identity = identity or username
+        self.ca_cert_file = ca_cert_file
+        self.ttls_phase2_method = phase2_method
+
+    def set_eap_tls(self, ssid, client_cert_file, private_key_file, private_key_password=None, disable_time_check=False):
+        """Configure EAP-TLS."""
+        self.ssid = ssid
+        self.network_type = NetworkType.WPA2_ENTERPRISE
+        self.eap_method = EAPMethod.TLS
+        self.client_cert_file = client_cert_file
+        self.private_key_file = private_key_file
+        if private_key_password:
+            self.private_key_password_hash = crypto.hash_password(private_key_password)
+        self.disable_time_check = disable_time_check
 
     def verify_password(self, password, password_type='main'):
         """Verify a plaintext password against stored hashes."""
@@ -140,4 +179,15 @@ class WiFiConfig:
             return True
         except Exception as e:
             print(f"[Config] Load failed: {e}") # This will now likely show a JSON error
+            return False
+
+    def clear(self):
+        """Clear stored configuration."""
+        try:
+            import os
+            os.remove(self.CONFIG_FILE)
+            print("[Config] Configuration cleared")
+            return True
+        except Exception as e:
+            print(f"[Config] Error clearing: {e}")
             return False

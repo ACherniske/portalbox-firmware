@@ -14,7 +14,7 @@ print("="*60)
 
 # Import WiFi manager
 try:
-    from core.wifi import WiFiConfig, WifiManager
+    from net import WiFiConfig, WifiManager
     print("[BOOT] WiFi module loaded")
 except ImportError as e:
     print(f"[BOOT] ERROR: Failed to import WiFi module: {e}")
