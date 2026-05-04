@@ -1,3 +1,4 @@
+# net/crypto.py
 import ubinascii
 import uhashlib
 import machine
