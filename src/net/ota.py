@@ -34,7 +34,7 @@ _PROTECTED_PATHS = [
     '/lib',
     '/sd',
     '/config',
-    'ca-cert.pem',
+    '/ca-cert.pem',
 ]
 
 
@@ -172,7 +172,8 @@ def _repo_download_size(manifest_paths, git_index, local_tree, ignore):
         if not item or item['type'] != 'blob':
             continue
         git_sha = item.get('sha', '')
-        local_sha = local_tree.get(path, '')
+        device_path = _device_path_from_repo_path(path)
+        local_sha = local_tree.get(device_path, '')
         if not (git_sha and local_sha and git_sha == local_sha):
             download += item.get('size', 0)
     return download
@@ -426,7 +427,8 @@ def pull_all(user=None, repository=None, branch=None, token=None,
     print('Scanning local files...')
     local_tree = _build_internal_tree()
 
-    manifest_set = set(manifest_paths)
+    device_manifest_paths = [_device_path_from_repo_path(p) for p in manifest_paths]
+    device_manifest_set = set(device_manifest_paths)
 
     log = []
     updated = 0
@@ -449,7 +451,8 @@ def pull_all(user=None, repository=None, branch=None, token=None,
             continue
 
         git_sha = item.get('sha', '')
-        local_sha = local_tree.get(path, '')
+        device_path = _device_path_from_repo_path(path)
+        local_sha = local_tree.get(device_path, '')
         if git_sha and local_sha and git_sha == local_sha:
             skipped += 1
             log.append(path + ' unchanged')
@@ -473,7 +476,7 @@ def pull_all(user=None, repository=None, branch=None, token=None,
             print('  FAILED:', path, error)
 
     for local_path in local_tree:
-        if local_path not in manifest_set and not _is_ignored(local_path, ignore):
+        if local_path not in device_manifest_set and not _is_ignored(local_path, ignore):
             try:
                 os.remove(local_path)
                 deleted += 1
@@ -528,7 +531,8 @@ def check_for_updates(user=None, repository=None, branch=None, token=None,
     git_index = _index_git_tree(git_tree)
     manifest_paths = _src_paths_from_git_index(git_index)
     local_tree = _build_internal_tree()
-    manifest_set = set(manifest_paths)
+    device_manifest_paths = [_device_path_from_repo_path(p) for p in manifest_paths]
+    device_manifest_set = set(device_manifest_paths)
 
     new = []
     changed = []
@@ -542,14 +546,15 @@ def check_for_updates(user=None, repository=None, branch=None, token=None,
         if not item or item['type'] != 'blob':
             continue
 
-        local_sha = local_tree.get(path, '')
+        device_path = _device_path_from_repo_path(path)
+        local_sha = local_tree.get(device_path, '')
         if not local_sha:
             new.append(path)
         elif item.get('sha', '') != local_sha:
             changed.append(path)
 
     for local_path in local_tree:
-        if local_path not in manifest_set and not _is_ignored(local_path, ignore):
+        if local_path not in device_manifest_set and not _is_ignored(local_path, ignore):
             deleted.append(local_path)
 
     return {'new': new, 'changed': changed, 'deleted': deleted}
