@@ -155,6 +155,13 @@ def _src_paths_from_git_index(git_index):
     return src_paths
 
 
+def _device_path_from_repo_path(repo_path):
+    """Strip /src/ prefix to map repo paths to device deployment paths."""
+    if repo_path.startswith('/src/'):
+        return '/' + repo_path[5:]
+    return repo_path
+
+
 def _repo_download_size(manifest_paths, git_index, local_tree, ignore):
     """Estimate bytes that must be downloaded for the manifest files."""
     download = 0
@@ -455,10 +462,11 @@ def pull_all(user=None, repository=None, branch=None, token=None,
                 config['repository'],
                 config['branch'],
             )
-            pull(path, raw_base + item['path'], config['token'])
+            device_path = _device_path_from_repo_path(path)
+            pull(device_path, raw_base + item['path'], config['token'])
             updated += 1
-            log.append(path + ' updated')
-            print('  updated:', path)
+            log.append(device_path + ' updated')
+            print('  updated:', device_path)
             gc.collect()
         except Exception as error:
             log.append(path + ' FAILED: ' + str(error))
