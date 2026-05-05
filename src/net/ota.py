@@ -21,6 +21,9 @@ _GITHUB_API = 'https://api.github.com/repos'
 _GITHUB_RAW = 'https://raw.githubusercontent.com'
 _USER_AGENT = 'portalbox-ota'
 _CONFIG_PATH = '/config/ota_config.json'
+_OTA_STATE_PATH = '/config/ota_state.json'
+_OTA_INTERVAL_SECONDS = 24 * 60 * 60
+_MIN_VALID_EPOCH = 1700000000
 _PROTECTED_PATHS = [
     # Protect device-local and runtime paths so OTA cannot wipe secrets
     _CONFIG_PATH,
@@ -236,6 +239,79 @@ def _resolve_config(user=None, repository=None, branch=None, token=None, ignore=
         'token': token if token is not None else config.get('token', ''),
         'ignore': ignore if ignore is not None else config.get('ignore', []),
     }
+
+
+def _load_ota_state(state_path=_OTA_STATE_PATH):
+    """Load the stored OTA state from disk."""
+    try:
+        with open(state_path, 'r') as file_handle:
+            state = json.loads(file_handle.read())
+            if isinstance(state, dict):
+                return state
+    except Exception:
+        pass
+    return {}
+
+
+def _save_ota_state(state, state_path=_OTA_STATE_PATH):
+    """Persist OTA state to disk."""
+    try:
+        _ensure_config_dir()
+        with open(state_path, 'w') as file_handle:
+            file_handle.write(json.dumps(state))
+    except Exception as error:
+        print('[OTA] Warning: failed to save OTA state: %s' % error)
+
+
+def _should_run_daily_ota(now_epoch, state):
+    """Return True when the stored OTA timestamp is stale or unavailable."""
+    if now_epoch < _MIN_VALID_EPOCH:
+        print('[OTA] Clock not synchronized yet; running OTA this boot.')
+        return True
+
+    last_run = state.get('last_success_epoch', 0)
+    if not isinstance(last_run, int):
+        return True
+    return (now_epoch - last_run) >= _OTA_INTERVAL_SECONDS
+
+
+def run_daily_update_if_due(user=None, repository=None, branch=None, token=None,
+                            ignore=None, isconnected=False, reset_after=False,
+                            state_path=_OTA_STATE_PATH):
+    """Run OTA once per day, using a persisted timestamp gate."""
+    config = _resolve_config(user, repository, branch, token, ignore)
+    ignore = _ensure_ignore(config['ignore'])
+
+    if not config['user'] or not config['repository']:
+        print('OTA config incomplete. Run ota.create_config() first.')
+        return None
+
+    if not isconnected:
+        print('WiFi must be connected before OTA can run.')
+        return None
+
+    state = _load_ota_state(state_path)
+    now_epoch = int(time.time())
+
+    if not _should_run_daily_ota(now_epoch, state):
+        next_run = state.get('last_success_epoch', 0) + _OTA_INTERVAL_SECONDS
+        print('[OTA] Not due yet. Next run after epoch: %d' % next_run)
+        return None
+
+    print('[OTA] Running daily update check...')
+    try:
+        log = pull_all(
+            user=config['user'], repository=config['repository'],
+            branch=config['branch'], token=config['token'],
+            ignore=ignore, isconnected=True, reset_after=reset_after,
+        )
+        state['last_success_epoch'] = int(time.time())
+        _save_ota_state(state, state_path)
+        print('[OTA] Update completed. Timestamp saved.')
+        return log
+    except Exception as error:
+        print('[OTA] Daily update failed: %s' % error)
+        return None
 
 
 def create_config(user='', repository='', branch='main', token='', ignore=None):
