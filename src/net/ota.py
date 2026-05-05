@@ -3,9 +3,9 @@
 Based on `ugit` by turfptax for the OpenMuscle project:
 https://github.com/turfptax/ugit
 
-This PortalBox adaptation provides GitHub-based firmware updates via manifest-driven
-file synchronization. Caller is responsible for establishing WiFi connection before
-initiating updates.
+This PortalBox adaptation provides GitHub-based firmware updates by syncing
+all repository files under `/src` (minus ignored/protected paths).
+Caller is responsible for establishing WiFi connection before initiating updates.
 """
 
 import os
@@ -17,21 +17,18 @@ import uhashlib as hashlib
 import urequests
 import machine
 
-__version__ = '0.1.0'
-
 _GITHUB_API = 'https://api.github.com/repos'
 _GITHUB_RAW = 'https://raw.githubusercontent.com'
 _USER_AGENT = 'portalbox-ota'
 _CONFIG_PATH = '/config/ota_config.json'
-_MANIFEST_REPO_PATH = 'src/config/manifest.json'
 _PROTECTED_PATHS = [
-    '/ota.py',
+    # Protect device-local and runtime paths so OTA cannot wipe secrets
     _CONFIG_PATH,
+    '/config/wifi_config.json',
     '/ota.backup',
     '/ota_log.txt',
     '/lib',
     '/sd',
-    '/src/config',
     '/config',
 ]
 
@@ -132,33 +129,6 @@ def _is_ignored(path, ignore):
     return False
 
 
-def _manifest_url(user, repository, branch):
-    """Return the raw GitHub URL for the OTA manifest."""
-    return '%s/%s/%s/%s/%s' % (
-        _GITHUB_RAW, user, repository, branch, _MANIFEST_REPO_PATH)
-
-
-def _load_manifest(user, repository, branch, token=''):
-    """Load and normalize the repo manifest into absolute device paths."""
-    response = urequests.get(_manifest_url(user, repository, branch), headers=_headers(token))
-    data = json.loads(response.content.decode('utf-8'))
-    response.close()
-
-    if isinstance(data, dict):
-        files = data.get('files', [])
-    else:
-        files = data
-
-    if not isinstance(files, list):
-        raise ValueError('manifest.json must contain a list of file paths')
-
-    manifest = []
-    for entry in files:
-        if isinstance(entry, str) and entry:
-            manifest.append('/' + entry.lstrip('/'))
-    return manifest
-
-
 def _index_git_tree(git_tree):
     """Index the Git tree by absolute path for quick lookups."""
     indexed = {}
@@ -168,6 +138,16 @@ def _index_git_tree(git_tree):
             path = '/' + path
         indexed[path] = item
     return indexed
+
+
+def _src_paths_from_git_index(git_index):
+    """Return sorted absolute paths for blob files under `/src` in the repo."""
+    src_paths = []
+    for path, item in git_index.items():
+        if item.get('type') == 'blob' and path.startswith('/src/'):
+            src_paths.append(path)
+    src_paths.sort()
+    return src_paths
 
 
 def _repo_download_size(manifest_paths, git_index, local_tree, ignore):
@@ -229,6 +209,12 @@ def _ensure_config_dir():
         os.mkdir('/config')
     except Exception:
         pass
+
+
+def _require_connected(isconnected):
+    """Require caller-managed WiFi connectivity before OTA operations."""
+    if not isconnected:
+        raise RuntimeError('WiFi must be connected first. Call with isconnected=True.')
 
 
 def _load_config():
@@ -330,25 +316,16 @@ def pull(filepath, raw_url, token=''):
 def pull_all(user=None, repository=None, branch=None, token=None,
              ssid=None, password=None, ignore=None,
              isconnected=False, reset_after=False):
-    """Sync the device to the manifest allowlist from the GitHub repo."""
+    """Sync the device to all repository blob files under `/src`."""
     config = _resolve_config(user, repository, branch, token, ignore)
     ignore = _ensure_ignore(config['ignore'])
 
     if not config['user'] or not config['repository']:
         raise ValueError('user and repository required. Pass them or run ota.create_config()')
 
-    if not isconnected:
-        wificonnect(ssid, password)
+    _require_connected(isconnected)
 
     os.chdir('/')
-
-    print('Fetching manifest...')
-    manifest_paths = _load_manifest(
-        config['user'],
-        config['repository'],
-        config['branch'],
-        config['token'],
-    )
 
     print('Fetching repository tree...')
     git_tree = pull_git_tree(
@@ -358,6 +335,8 @@ def pull_all(user=None, repository=None, branch=None, token=None,
         config['token'],
     )
     git_index = _index_git_tree(git_tree)
+    manifest_paths = _src_paths_from_git_index(git_index)
+    print('Targeting %d files under /src' % len(manifest_paths))
 
     print('Scanning local files...')
     local_tree = _build_internal_tree()
@@ -376,7 +355,7 @@ def pull_all(user=None, repository=None, branch=None, token=None,
 
         item = git_index.get(path)
         if not item:
-            log.append(path + ' missing from manifest tree')
+            log.append(path + ' missing from git tree')
             continue
 
         if item['type'] != 'blob':
@@ -441,15 +420,14 @@ def pull_all(user=None, repository=None, branch=None, token=None,
 def check_for_updates(user=None, repository=None, branch=None, token=None,
                       ignore=None, isconnected=False,
                       ssid=None, password=None):
-    """Return new, changed, and deleted manifest-tracked files."""
+    """Return new, changed, and deleted files for repo blobs under `/src`."""
     config = _resolve_config(user, repository, branch, token, ignore)
     ignore = _ensure_ignore(config['ignore'])
 
     if not config['user'] or not config['repository']:
         raise ValueError('user and repository required. Pass them or run ota.create_config()')
 
-    if not isconnected:
-        wificonnect(ssid, password)
+    _require_connected(isconnected)
 
     os.chdir('/')
     git_tree = pull_git_tree(
@@ -459,12 +437,7 @@ def check_for_updates(user=None, repository=None, branch=None, token=None,
         config['token'],
     )
     git_index = _index_git_tree(git_tree)
-    manifest_paths = _load_manifest(
-        config['user'],
-        config['repository'],
-        config['branch'],
-        config['token'],
-    )
+    manifest_paths = _src_paths_from_git_index(git_index)
     local_tree = _build_internal_tree()
     manifest_set = set(manifest_paths)
 
@@ -641,8 +614,7 @@ def safe_pull_all(user=None, repository=None, branch=None, token=None,
     if not config['user'] or not config['repository']:
         raise ValueError('user and repository required. Pass them or run ota.create_config()')
 
-    if not isconnected:
-        wificonnect(ssid, password)
+    _require_connected(isconnected)
 
     os.chdir('/')
 
@@ -657,12 +629,7 @@ def safe_pull_all(user=None, repository=None, branch=None, token=None,
         config['token'],
     )
     git_index = _index_git_tree(git_tree)
-    manifest_paths = _load_manifest(
-        config['user'],
-        config['repository'],
-        config['branch'],
-        config['token'],
-    )
+    manifest_paths = _src_paths_from_git_index(git_index)
     local_tree = _build_internal_tree()
 
     download_size = _repo_download_size(manifest_paths, git_index, local_tree, ignore)
