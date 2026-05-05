@@ -67,6 +67,14 @@ def _print_connection_status(wifi):
     print('WIFI CONNECTION SUCCESSFUL')
     print('=' * 60)
 
+    status = wifi.get_status()
+    print('SSID: %s' % status['ssid'])
+    print('Network Type: %s' % status['network_type'])
+    print('IP Address: %s' % status['ip'])
+    print('Gateway: %s' % status['gateway'])
+    print('DNS: %s' % status['dns'])
+    print('=' * 60)
+
 
 def _fmt_size(size_bytes):
     """Format bytes as a compact human-readable string."""
@@ -96,14 +104,6 @@ def _print_storage_info():
         print('=' * 60)
     except Exception as error:
         print('[BOOT] Storage check failed: %s' % error)
-
-    status = wifi.get_status()
-    print('SSID: %s' % status['ssid'])
-    print('Network Type: %s' % status['network_type'])
-    print('IP Address: %s' % status['ip'])
-    print('Gateway: %s' % status['gateway'])
-    print('DNS: %s' % status['dns'])
-    print('=' * 60)
 
 
 def main():
