@@ -33,6 +33,7 @@ _PROTECTED_PATHS = [
     '/lib',
     '/sd',
     '/config',
+    'ca-cert.pem',
 ]
 
 
