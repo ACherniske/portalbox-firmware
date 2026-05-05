@@ -382,21 +382,39 @@ def pull(filepath, raw_url, token=''):
         raise RuntimeError('urequests is unavailable')
 
     response = urequests.get(raw_url, headers=_headers(token))
-    data = response.content
-    response.close()
+    try:
+        parts = filepath.split('/')
+        for index in range(1, len(parts)):
+            directory = '/'.join(parts[:index])
+            if directory:
+                try:
+                    os.mkdir(directory)
+                except Exception:
+                    pass
 
-    parts = filepath.split('/')
-    for index in range(1, len(parts)):
-        directory = '/'.join(parts[:index])
-        if directory:
-            try:
-                os.mkdir(directory)
-            except Exception:
-                pass
+        # Stream response body in small chunks to avoid large memory allocations
+        with open(filepath, 'wb') as file_handle:
+            reader = getattr(response, 'raw', None)
+            if reader is not None:
+                while True:
+                    chunk = reader.read(1024)
+                    if not chunk:
+                        break
+                    file_handle.write(chunk)
+                    gc.collect()
+            else:
+                # Fallback: some urequests implementations only expose .content
+                data = response.content
+                file_handle.write(data)
+                del data
+                gc.collect()
+    finally:
+        try:
+            response.close()
+        except Exception:
+            pass
 
-    with open(filepath, 'wb') as file_handle:
-        file_handle.write(data)
-    return data
+    return None
 
 
 def pull_all(user=None, repository=None, branch=None, token=None,

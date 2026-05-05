@@ -67,6 +67,36 @@ def _print_connection_status(wifi):
     print('WIFI CONNECTION SUCCESSFUL')
     print('=' * 60)
 
+
+def _fmt_size(size_bytes):
+    """Format bytes as a compact human-readable string."""
+    try:
+        size = float(size_bytes)
+    except Exception:
+        return str(size_bytes)
+    if size < 1024:
+        return '%d B' % int(size)
+    for unit in ['KB', 'MB', 'GB', 'TB']:
+        size = size / 1024.0
+        if size < 1024.0:
+            return '%.1f %s' % (size, unit)
+    return '%.1f PB' % size
+
+
+def _print_storage_info():
+    """Print total, used, and free storage for debugging."""
+    try:
+        total, free, used = ota._get_storage_info()
+        print('\n' + '=' * 60)
+        print('STORAGE INFO')
+        print('=' * 60)
+        print('Total: %s' % _fmt_size(total))
+        print('Used:  %s' % _fmt_size(used))
+        print('Free:  %s' % _fmt_size(free))
+        print('=' * 60)
+    except Exception as error:
+        print('[BOOT] Storage check failed: %s' % error)
+
     status = wifi.get_status()
     print('SSID: %s' % status['ssid'])
     print('Network Type: %s' % status['network_type'])
@@ -85,6 +115,7 @@ def main():
     password = _get_password(config)
     wifi = _connect_wifi(config, password)
     _print_connection_status(wifi)
+    _print_storage_info()
 
     ota.run_daily_update_if_due(isconnected=True, reset_after=False)
     print('\n[BOOT] Boot sequence complete. Ready for operation.')
