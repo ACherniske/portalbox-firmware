@@ -71,8 +71,6 @@ class WifiManager:
             return None
 
     def _connect_wpa2_enterprise(self, password, private_key_password=None):
-        self._sync_time()
-
         if self.config.eap_method == EAPMethod.PWD:
             return self._connect_eap_pwd(password)
         if self.config.eap_method == EAPMethod.PEAP:
@@ -322,6 +320,12 @@ class WifiManager:
         self._log("[WiFi] Connected successfully!")
         self._log(f"[WiFi] IP: {ifconfig[0]}")
         self._log(f"[WiFi] Gateway: {ifconfig[2]}")
+        # Network is up; attempt to synchronize system time via NTP
+        try:
+            self._sync_time()
+        except Exception:
+            # _sync_time logs its own errors; don't let NTP failures break connection
+            pass
         return True
 
     def connect(self, password, private_key_password=None, skip_init=False):
