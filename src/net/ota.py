@@ -8,6 +8,7 @@ all repository files under `/src` (minus ignored/protected paths).
 Caller is responsible for establishing WiFi connection before initiating updates.
 """
 
+import gc
 import os
 import time
 
@@ -425,6 +426,8 @@ def pull_all(user=None, repository=None, branch=None, token=None,
     skipped = 0
     deleted = 0
 
+    gc.collect()
+
     for path in manifest_paths:
         if _is_ignored(path, ignore):
             skipped += 1
@@ -456,6 +459,7 @@ def pull_all(user=None, repository=None, branch=None, token=None,
             updated += 1
             log.append(path + ' updated')
             print('  updated:', path)
+            gc.collect()
         except Exception as error:
             log.append(path + ' FAILED: ' + str(error))
             print('  FAILED:', path, error)
