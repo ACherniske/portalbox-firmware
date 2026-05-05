@@ -1,0 +1,11 @@
+{
+  "user": "ACherniske",
+  "repository": "portalbox-firmware",
+  "branch": "main",
+  "token": "",
+  "ignore": [
+    "/src/config/example_wifi_config.json",
+    "/src/config/example_ota_config.json",
+    "/src/config/manifest.json"
+  ]
+}

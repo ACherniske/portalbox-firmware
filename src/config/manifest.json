@@ -1,0 +1,8 @@
+[
+  "src/boot.py",
+  "src/net/__init__.py",
+  "src/net/crypto.py",
+  "src/net/models.py",
+  "src/net/wifi.py",
+  "src/net/ota.py"
+]
