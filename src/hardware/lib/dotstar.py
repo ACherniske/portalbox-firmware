@@ -1,7 +1,6 @@
 # hardware/drivers/dotstar.py
 # DotStar LED driver for MicroPython
 
-import gc
 from micropython import const
 
 # Start and end frame constants
@@ -10,15 +9,15 @@ _END_FRAME = const(0xFF)
 _LED_START = const(0xE0)  # First 3 bits set to 1 (APA102 requirement)
 
 class DotStar:
-    """
-    Low-level driver for DotStar APA102 LED strips.
+    """Low-level driver for DotStar (APA102) LED strips.
 
     The DotStar protocol requires:
     - Start frame: 4 bytes of 0x00
     - LED frames: 4 bytes per LED (0xE0 + brightness, blue, green, red)
-    - End frame: 4 bytes of 0xFF
+    - End frame: a number of 0xFF bytes (see end frame sizing below)
 
-    Colors are stored in RGB format and converted to GBR for transmission.
+    Colors are stored as RGB tuples in the public API; internally
+    they are encoded BGR in the transmission buffer.
     """
     def __init__(self, spi, num_leds=10, brightness=31):
         """
@@ -32,7 +31,31 @@ class DotStar:
         self.spi = spi
         self.num_leds = num_leds
         self._brightness = max(0, min(31, brightness))  # Clamp 0-31
-        self._leds = [(0, 0, 0)] * num_leds  # RGB format
+
+        # End frame size as recommended for APA102: (n + 15) // 16
+        self._end_bytes = (num_leds + 15) // 16
+
+        # Preallocate full transmission buffer:
+        # 4 bytes start + 4 * num_leds (per-LED) + end frame bytes
+        total = 4 + (num_leds * 4) + self._end_bytes
+        self._buf = bytearray(total)
+
+        # Start frame (4 bytes of 0x00)
+        for i in range(4):
+            self._buf[i] = _START_FRAME
+
+        # Initialize LED frames (header + B,G,R)
+        for i in range(num_leds):
+            base = 4 + (i * 4)
+            self._buf[base] = _LED_START | self._brightness
+            self._buf[base + 1] = 0
+            self._buf[base + 2] = 0
+            self._buf[base + 3] = 0
+
+        # End frame bytes (0xFF)
+        end_start = 4 + (num_leds * 4)
+        for i in range(self._end_bytes):
+            self._buf[end_start + i] = _END_FRAME
 
     @property
     def brightness(self):
@@ -47,16 +70,12 @@ class DotStar:
         Args:
             value: Brightness level (0-31), will be clamped to valid range
         """
+        # Update internal brightness and rewrite all LED headers
         self._brightness = max(0, min(31, value))
 
-    def _write_bytes(self, data):
-        """
-        Write data to SPI bus.
-
-        Args:
-            data: Byte array to write
-        """
-        self.spi.write(bytearray(data))
+        for i in range(self.num_leds):
+            base = 4 + (i * 4)
+            self._buf[base] = _LED_START | self._brightness
 
     def set_pixel(self, index, r, g, b):
         """
@@ -69,7 +88,13 @@ class DotStar:
             b: Blue value (0-255)
         """
         if 0 <= index < self.num_leds:
-            self._leds[index] = (r, g, b)
+            base = 4 + (index * 4)
+
+            # Header (brightness) + B, G, R
+            self._buf[base] = _LED_START | self._brightness
+            self._buf[base + 1] = b
+            self._buf[base + 2] = g
+            self._buf[base + 3] = r
 
     def get_pixel(self, index):
         """
@@ -82,7 +107,11 @@ class DotStar:
             Tuple of (r, g, b) or None if index invalid
         """
         if 0 <= index < self.num_leds:
-            return self._leds[index]
+            base = 4 + (index * 4)
+            r = self._buf[base + 3]
+            g = self._buf[base + 2]
+            b = self._buf[base + 1]
+            return (r, g, b)
         return None
 
     def fill(self, r, g, b):
@@ -94,7 +123,8 @@ class DotStar:
             g: Green value (0-255)
             b: Blue value (0-255)
         """
-        self._leds = [(r, g, b)] * self.num_leds
+        for i in range(self.num_leds):
+            self.set_pixel(i, r, g, b)
 
     def clear(self):
         """Turn off all LEDs (set to black)."""
@@ -102,23 +132,8 @@ class DotStar:
 
     def show(self):
         """Update LEDs with current buffer values."""
-        # Start frame
-        self._write_bytes([_START_FRAME] * 4)
-
-        # LED frames (convert RGB to GBR for APA102)
-        for r, g, b in self._leds:
-            self._write_bytes([
-                _LED_START | self._brightness,
-                b,  # Blue
-                g,  # Green
-                r   # Red
-            ])
-
-        # End frame
-        self._write_bytes([_END_FRAME] * 4)
-
-        # Collect garbage
-        gc.collect()
+        # Single SPI write of the prebuilt buffer (start + led frames + end)
+        self.spi.write(self._buf)
 
     def write(self):
         """Alias for show() for compatibility."""
