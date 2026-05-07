@@ -3,7 +3,7 @@
 # DATA -> GPIO14
 
 from machine import Pin, SPI
-from hardware.drivers.dotstar import DotStar
+from hardware.lib.dotstar import DotStar
 import time
 
 NUM_LEDS = 10

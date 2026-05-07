@@ -2,7 +2,7 @@
 # Onboard NeoPixel test
 # DATA -> GPIO38
 
-from neopixel_wrapper import neopixel_wrapper
+from hardware.lib.neopixel_wrapper import neopixel_wrapper
 import time
 
 # Most ESP32-S3 boards only have 1 onboard NeoPixel
