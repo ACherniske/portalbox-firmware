@@ -1,4 +1,4 @@
-# hardware/drivers/neopixel.py 
+# hardware/drivers/neopixel.py
 # NeoPixel LED driver for MicroPython
 
 from machine import Pin
@@ -6,12 +6,13 @@ import neopixel
 
 
 class neopixel_wrapper:
-    """NeoPixel driver wrapper with a DotStar-like API.
+    """NeoPixel driver wrapper with a DotStar-like RGB API.
 
-    This wrapper keeps an internal logical pixel buffer (`self._pixels`)
-    of unscaled RGB values and writes a scaled output buffer to the
-    underlying NeoPixel driver for efficient `show()` calls.
-    Brightness is exposed as an integer 0-31 to match DotStar.
+    Public API uses RGB ordering:
+        set_pixel(index, r, g, b)
+
+    Internal hardware transmission is converted to GRB ordering
+    for WS2812/NeoPixel compatibility.
     """
 
     def __init__(self, pin, num_pixels, brightness=31):
@@ -22,35 +23,37 @@ class neopixel_wrapper:
         self.pin = pin
         self.num_pixels = num_pixels
 
-        # Accept either 0-31 (int) or 0.0-1.0 (float) for compatibility
+        # Accept either 0-31 or 0.0-1.0
         if isinstance(brightness, float) and 0.0 <= brightness <= 1.0:
             self._brightness = int(brightness * 31)
         else:
             self._brightness = max(0, min(31, int(brightness)))
 
-        # Logical pixel storage (unscaled RGB) so brightness changes can be
-        # reapplied without losing original color values.
+        # Store logical RGB values
         self._pixels = bytearray(num_pixels * 3)
 
-        # Initialize NeoPixel instance and try to use its internal buffer
+        # Create NeoPixel object
         self.np = neopixel.NeoPixel(self.pin, num_pixels)
 
-        # Some NeoPixel implementations expose `buf` (bytearray). Prefer
-        # writing directly into that buffer when available.
-        self._has_buf = hasattr(self.np, 'buf') and isinstance(self.np.buf, (bytearray, memoryview))
+        # Use internal NeoPixel buffer if available
+        self._has_buf = hasattr(self.np, 'buf') and isinstance(
+            self.np.buf,
+            (bytearray, memoryview)
+        )
+
         if self._has_buf:
             self._out_buf = self.np.buf
         else:
-            # Fallback output buffer; we'll write per-pixel into `self.np`
             self._out_buf = bytearray(num_pixels * 3)
 
-        # Initialize buffers to zero
+        # Initialize buffers
         for i in range(len(self._pixels)):
             self._pixels[i] = 0
+
         for i in range(len(self._out_buf)):
             self._out_buf[i] = 0
 
-        # Clear on startup
+        # Clear LEDs
         self.clear()
         self.show()
 
@@ -62,87 +65,93 @@ class neopixel_wrapper:
 
     @property
     def brightness(self):
-        """Brightness as integer 0-31 to match DotStar."""
         return self._brightness
 
     @brightness.setter
     def brightness(self, value):
-        # Accept float 0.0-1.0 or int 0-31
         if isinstance(value, float) and 0.0 <= value <= 1.0:
             self._brightness = int(value * 31)
         else:
             self._brightness = max(0, min(31, int(value)))
 
-        # Reapply scaled values into output buffer
         self._apply_brightness_to_outbuf()
 
+    def _write_scaled_pixel(self, index, r, g, b):
+        """Write scaled RGB value into GRB hardware buffer."""
+        base = index * 3
+
+        # Convert RGB -> GRB
+        self._out_buf[base] = g
+        self._out_buf[base + 1] = r
+        self._out_buf[base + 2] = b
+
     def _apply_brightness_to_outbuf(self):
-        """Scale logical pixels into the output buffer according to brightness."""
-        if self._brightness == 31:
-            # Max brightness: copy logical buffer to out buffer
-            for i in range(self.num_pixels * 3):
-                self._out_buf[i] = self._pixels[i]
-        else:
-            scale = self._brightness / 31.0
-            for i in range(self.num_pixels):
-                base = i * 3
-                r = int(self._pixels[base] * scale)
-                g = int(self._pixels[base + 1] * scale)
-                b = int(self._pixels[base + 2] * scale)
-                self._out_buf[base] = r
-                self._out_buf[base + 1] = g
-                self._out_buf[base + 2] = b
+        """Apply brightness scaling to all pixels."""
+        scale = self._brightness / 31.0
+
+        for i in range(self.num_pixels):
+            base = i * 3
+
+            r = int(self._pixels[base] * scale)
+            g = int(self._pixels[base + 1] * scale)
+            b = int(self._pixels[base + 2] * scale)
+
+            self._write_scaled_pixel(i, r, g, b)
 
     def set_pixel(self, index, r, g, b):
-        """Set a single pixel color (logical RGB)."""
+        """Set a single pixel using RGB ordering."""
         if 0 <= index < self.num_pixels:
             base = index * 3
 
-            # Store logical (unscaled) color
+            # Store logical RGB values
             self._pixels[base] = max(0, min(255, int(r)))
             self._pixels[base + 1] = max(0, min(255, int(g)))
             self._pixels[base + 2] = max(0, min(255, int(b)))
 
-            # Write scaled value into output buffer immediately
-            if self._brightness == 31:
-                self._out_buf[base] = self._pixels[base]
-                self._out_buf[base + 1] = self._pixels[base + 1]
-                self._out_buf[base + 2] = self._pixels[base + 2]
-            else:
-                scale = self._brightness / 31.0
-                self._out_buf[base] = int(self._pixels[base] * scale)
-                self._out_buf[base + 1] = int(self._pixels[base + 1] * scale)
-                self._out_buf[base + 2] = int(self._pixels[base + 2] * scale)
+            # Apply brightness scaling
+            scale = self._brightness / 31.0
 
-            # If not using underlying buf, also write into self.np per-index
+            sr = int(self._pixels[base] * scale)
+            sg = int(self._pixels[base + 1] * scale)
+            sb = int(self._pixels[base + 2] * scale)
+
+            # Write RGB -> GRB
+            self._write_scaled_pixel(index, sr, sg, sb)
+
+            # Fallback mode without direct buffer access
             if not self._has_buf:
-                self.np[index] = (self._out_buf[base], self._out_buf[base + 1], self._out_buf[base + 2])
+                self.np[index] = (sg, sr, sb)
 
     def get_pixel(self, index):
+        """Get logical RGB pixel value."""
         if 0 <= index < self.num_pixels:
             base = index * 3
-            return (self._pixels[base], self._pixels[base + 1], self._pixels[base + 2])
+            return (
+                self._pixels[base],
+                self._pixels[base + 1],
+                self._pixels[base + 2]
+            )
         return None
 
     def fill(self, r, g, b):
+        """Fill strip with RGB color."""
         for i in range(self.num_pixels):
             self.set_pixel(i, r, g, b)
 
     def clear(self):
+        """Turn all LEDs off."""
         self.fill(0, 0, 0)
 
     def show(self):
-        """Write the output buffer to the hardware in a single operation when possible."""
+        """Write buffer to LEDs."""
         if self._has_buf:
-            # If _out_buf references self.np.buf, ensure it's up to date then write
             if self._out_buf is not self.np.buf:
-                # copy to hardware buffer
                 self.np.buf[:] = self._out_buf
+
             self.np.write()
         else:
-            # Fallback: per-pixel assignments already updated in set_pixel,
-            # but ensure write is called to flush to LEDs
             self.np.write()
 
     def write(self):
+        """Compatibility alias."""
         self.show()
