@@ -2,7 +2,7 @@
 # Interface for MFRC522 RFID reader with debouncing and card management
 
 from machine import Pin
-from mfrc522 import MFRC522
+from hardware.lib.mfrc522 import MFRC522
 import time
 
 
