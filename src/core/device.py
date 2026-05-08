@@ -167,3 +167,118 @@ class Device:
         except Exception as e:
             print(f"[Device] ERROR: Failed to initialize LED controller: {e}")
             self.led = None
+
+    # =========================================================================
+    # High-level hardware control methods
+    # =========================================================================
+
+    def startup_sequence(self):
+        """
+        Run startup sequence with visual and audio feedback
+
+        Call this after initialzation to indicate device is ready
+        """
+        print("[Device] Running startup sequence...")
+        if self.buzzer:
+            self.buzzer.beep(duration_ms = 500)
+
+        if self.led:
+            self.led.wipe('BLUE', wait_ms = 30, clear_after = True)
+
+        print("[Device] Startup sequence complete")
+
+    def shutdown_sequence(self):
+        """
+        Run shutdown sequence with visual and audio feedback
+
+        Call this before shutdown to indicate device is powering down
+        """
+        print("[Device] Running shutdown sequence...")
+
+        if self.led:
+            self.led.stop()
+            self.led.clear()
+
+        if self.buzzer:
+            self.buzzer.stop()
+
+        if self.relay:
+            self.relay.turn_off()
+
+        if self.rfid:
+            self.rfid.stop_crypto()
+
+        print("[Device] Shutdown sequence complete")
+
+    def cleanup(self):
+        """
+        Cleanup and deinitialize hardware components
+
+        Call this when completely done with hardware
+        """
+
+        self.shutdown_sequence()
+
+        # Deinitialize components
+        if self.spi:
+            self.spi.deinit()
+            self.spi = None
+
+        if self.spi_led:
+            self.spi_led.deinit()
+            self.spi_led = None
+
+        gc.collect()
+        print("[Device] Hardware cleanup complete")
+
+    # =========================================================================
+    # Component status methods
+    # =========================================================================
+
+    def get_status(self):
+        """
+        Get status of all hardware components.
+        
+        Returns:
+            dict: Status of each component
+        """
+        return {
+            'buzzer': self.buzzer is not None,
+            'relay': self.relay is not None,
+            'rfid': self.rfid is not None and self.rfid.is_initialized,
+            'led': self.led is not None,
+            'button': self.button is not None,
+            'relay_state': self.relay.state if self.relay else None,
+        }
+
+    def print_status(self):
+        """Print hardware status to console."""
+        print("\n=== Hardware Status ===")
+        status = self.get_status()
+
+        for component, active in status.items():
+            if component == 'relay_state':
+                if active is not None:
+                    print(f"  Relay: {'ON' if active else 'OFF'}")
+            else:
+                status_str = "OK" if active else "FAILED"
+                print(f"  {component.upper()}: {status_str}")
+
+        print("=====================\n")
+
+# Singleton instance of Device
+_device = None
+
+def get_device():
+    """Get the singleton Device instance, initializing if necessary."""
+    global _device
+    if _device is None:
+        _device = Device()
+    return _device
+
+def cleanup_device():
+    """Cleanup the singleton Device instance."""
+    global _device
+    if _device is not None:
+        _device.cleanup()
+        _device = None
