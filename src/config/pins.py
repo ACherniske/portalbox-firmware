@@ -15,6 +15,7 @@ SPI_ID = const(1)
 SPI_SCK = const(38)
 SPI_MOSI = const(37)
 SPI_MISO = const(36)
+SPI_BAUDRATE = const(1000000)
 
 # RFID Pins
 RFID_CS = const(2)
