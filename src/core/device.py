@@ -86,7 +86,7 @@ class Device:
     def _init_button(self):
         """Initialize button."""
         try:
-            self.button = Button(pins.BUTTON_PIN)
+            self.button = Button(pins.BUTTON)
             print("[Device] Button initialized")
         except Exception as e:
             print(f"[Device] ERROR: Failed to initialize button: {e}")
@@ -95,7 +95,7 @@ class Device:
     def _init_buzzer(self):
         """Initialize buzzer."""
         try:
-            self.buzzer = Buzzer(pins.BUZZER_PIN)
+            self.buzzer = Buzzer(pins.BUZZER)
             print("[Device] Buzzer initialized")
         except Exception as e:
             print(f"[Device] ERROR: Failed to initialize buzzer: {e}")
@@ -105,8 +105,8 @@ class Device:
         """Initialize relay controller."""
         try:
             self.relay = Relay(
-                pins.RELAY_AC_PIN, 
-                pins.RELAY_USB_PIN
+                pins.AC_RELAY,
+                pins.USB_RELAY
             )
             print("[Device] Relay controller initialized")
         except Exception as e:
@@ -124,7 +124,7 @@ class Device:
                 spi = self.spi,
                 cs_pin = pins.RFID_CS,
                 rst_pin = pins.RFID_RST,
-                debounce_time = settings.RFID_DEBOUNCE_TIME
+                debounce_ms = settings.RFID_DEBOUNCE_MS
             )
 
             if self.rfid.is_initialized():
@@ -142,7 +142,7 @@ class Device:
 
             # import appropriate LED driver based on settings
             if settings.LED_TYPE == "dotstar":
-                from hardware.drivers.dotstar import DotStar
+                from hardware.lib.dotstar import DotStar
                 driver = DotStar(
                     spi = self.spi_led,
                     num_leds = settings.LED_COUNT,
@@ -150,7 +150,7 @@ class Device:
                 )
 
             elif settings.LED_TYPE == "neopixel":
-                from hardware.drivers.neopixel_wrapper import neopixel_wrapper
+                from hardware.lib.neopixel_wrapper import neopixel_wrapper
                 driver = neopixel_wrapper(
                     pin = pins.SPI_LED_MOSI, # NeoPixel uses MOSI pin for data
                     num_pixels = settings.LED_COUNT,
