@@ -1,44 +1,80 @@
-# Buzzer test script
+# main.py
+# Active buzzer test script
 #
-# Plays 3 quick pips.
+# Plays:
+# - single beep
+# - triple beep
+# - continuous warning beep
+#
+# Buzzer GPIO: 4
 
 import uasyncio as asyncio
 from hardware.buzzer import Buzzer
 
 # =========================================================
-# Configuration
+# Setup
 # =========================================================
 
 BUZZER_PIN = 4
 
-# =========================================================
-# Setup
-# =========================================================
-
 buzzer = Buzzer(
     pin_num=BUZZER_PIN,
-    enabled=True,
-    volume=50
+    enabled=True
 )
 
 # =========================================================
-# Test Task
+# Test Routine
 # =========================================================
 
 async def buzzer_test():
-    print("Playing 3 quick pips...")
+    print("Starting buzzer test...")
 
-    # Pattern: 3 short high-pitched beeps
-    pattern = (
-        (2000, 100),
-        (2000, 100),
-        (2000, 100),
+    # -----------------------------------------------------
+    # Single beep
+    # -----------------------------------------------------
+
+    print("Single beep")
+    buzzer.play(Buzzer.BEEP_CARD_READ)
+
+    await asyncio.sleep(1)
+
+    # -----------------------------------------------------
+    # Triple beep
+    # -----------------------------------------------------
+
+    print("Triple beep")
+
+    triple_pattern = (
+        100,
+        100,
+        100
     )
 
-    buzzer.play(pattern)
+    buzzer.play(triple_pattern)
 
-    # Wait long enough for pattern to finish
     await asyncio.sleep(1)
+
+    # -----------------------------------------------------
+    # Continuous warning beep
+    # -----------------------------------------------------
+
+    print("Continuous warning beep")
+
+    warning_pattern = (
+        300,
+    )
+
+    buzzer.play(
+        warning_pattern,
+        continuous=True,
+        interval_ms=500
+    )
+
+    await asyncio.sleep(5)
+
+    # -----------------------------------------------------
+    # Stop buzzer
+    # -----------------------------------------------------
 
     buzzer.stop()
 
