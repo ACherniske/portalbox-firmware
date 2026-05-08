@@ -77,11 +77,29 @@ class Device:
 
     def _init_hardware(self):
         """Initialize all hardware components."""
-        self._init_buzzer()
+
+        if settings.ENABLE_BUZZER:
+            self._init_buzzer()
+        else:
+            print("[Device] Buzzer disabled in settings")
+
+        # Relay currently always enabled
         self._init_relay()
-        self._init_led()
-        self._init_rfid()
-        self._init_button()
+
+        if settings.ENABLE_LEDS:
+            self._init_led()
+        else:
+            print("[Device] LEDs disabled in settings")
+
+        if settings.ENABLE_RFID:
+            self._init_rfid()
+        else:
+            print("[Device] RFID disabled in settings")
+
+        if settings.ENABLE_BUTTONS:
+            self._init_button()
+        else:
+            print("[Device] Buttons disabled in settings")
 
     def _init_button(self):
         """Initialize button."""
@@ -182,11 +200,24 @@ class Device:
         Call this after initialzation to indicate device is ready
         """
         print("[Device] Running startup sequence...")
-        if self.buzzer:
-            self.buzzer.play(500)
 
+        # Startup beep
+        if self.buzzer:
+            self.buzzer.play(
+                (
+                    100,
+                    100,
+                )
+            )
+
+        # Startup LED animation
         if self.led:
-            self.led.wipe('BLUE', wait_ms = 30, clear_after = True)
+            self.led.stop()
+            self.led.wipe(
+                'BLUE',
+                wait_ms = 30,
+                clear_after = True
+            )
 
         print("[Device] Startup sequence complete")
 
@@ -198,18 +229,35 @@ class Device:
         """
         print("[Device] Running shutdown sequence...")
 
+        # Shutdown LED sequence
         if self.led:
             self.led.stop()
-            self.led.clear()
 
+            self.led.fill('RED')
+
+        # Shutdown beep
         if self.buzzer:
-            self.buzzer.stop()
+            self.buzzer.play(
+                (
+                    300,
+                )
+            )
 
+        # Turn off relays
         if self.relay:
             self.relay.turn_off()
 
+        # Stop RFID crypto session
         if self.rfid:
             self.rfid.stop_crypto()
+
+        # Fully clear LEDs after animation trigger
+        if self.led:
+            self.led.clear()
+
+        # Ensure buzzer is silent
+        if self.buzzer:
+            self.buzzer.stop()
 
         print("[Device] Shutdown sequence complete")
 
