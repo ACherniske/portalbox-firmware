@@ -86,7 +86,7 @@ class Device:
     def _init_button(self):
         """Initialize button."""
         try:
-            self.button = Button(pins.BUTTON)
+            self.button = Button(pins.BUTTON_PIN)
             print("[Device] Button initialized")
         except Exception as e:
             print(f"[Device] ERROR: Failed to initialize button: {e}")
@@ -95,7 +95,7 @@ class Device:
     def _init_buzzer(self):
         """Initialize buzzer."""
         try:
-            self.buzzer = Buzzer(pins.BUZZER)
+            self.buzzer = Buzzer(pins.BUZZER_PIN)
             print("[Device] Buzzer initialized")
         except Exception as e:
             print(f"[Device] ERROR: Failed to initialize buzzer: {e}")
@@ -105,8 +105,8 @@ class Device:
         """Initialize relay controller."""
         try:
             self.relay = Relay(
-                pins.AC_RELAY,
-                pins.USB_RELAY
+                pins.RELAY_AC_PIN,
+                pins.RELAY_USB_PIN
             )
             print("[Device] Relay controller initialized")
         except Exception as e:
@@ -127,11 +127,14 @@ class Device:
                 debounce_ms = settings.RFID_DEBOUNCE_MS
             )
 
-            if self.rfid.is_initialized():
+            if self.rfid.is_initialized:
                 print("[Device] RFID reader initialized")
             else:
                 print("[Device] ERROR: RFID reader failed to initialize")
                 self.rfid = None
+        except Exception as e:
+            print(f"[Device] ERROR: Failed to initialize RFID reader: {e}")
+            self.rfid = None
 
     def _init_led(self):
         """Initialize LED controller."""
@@ -180,7 +183,7 @@ class Device:
         """
         print("[Device] Running startup sequence...")
         if self.buzzer:
-            self.buzzer.beep(duration_ms = 500)
+            self.buzzer.play(500)
 
         if self.led:
             self.led.wipe('BLUE', wait_ms = 30, clear_after = True)
