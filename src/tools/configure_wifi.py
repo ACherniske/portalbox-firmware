@@ -21,4 +21,3 @@ def configure_wifi_enterprise(ssid, username, password, identity=None, eap='PEAP
     else:
         c.set_wpa2_enterprise(ssid, username, password)
     c.save()
-
