@@ -3,6 +3,10 @@
 
 from micropython import const
 
+# Relay Pins
+RELAY_AC_PIN = const(18)
+RELAY_USB_PIN = const(9)
+
 # SPI Bus 1 (RFID)
 SPI_ID = const(1)
 SPI_SCK = const(38)
