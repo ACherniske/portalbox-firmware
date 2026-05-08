@@ -7,6 +7,9 @@ from micropython import const
 RELAY_AC_PIN = const(18)
 RELAY_USB_PIN = const(9)
 
+# Buzzer Pin
+BUZZER_PIN = const(4)
+
 # SPI Bus 1 (RFID)
 SPI_ID = const(1)
 SPI_SCK = const(38)
