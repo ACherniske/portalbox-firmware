@@ -21,4 +21,4 @@ SPI_LED_MISO = const(3) # Not used for DotStar, but defined for completeness
 SPI_LED_BAUDRATE = const(1000000)
 
 # Onboard Neopixel (if available)
-# ONBOARD_NEOPIXEL = const(38) pin 38 is used for SPI SCK, so onboard neopixel is not available
+ONBOARD_NEOPIXEL = None  # GPIO38, but currently used for SCK of SPI1
