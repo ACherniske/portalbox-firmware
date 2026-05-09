@@ -112,7 +112,7 @@ class DeviceFSM:
 
         # Stop previous animations/sounds
         if led:
-            led.stop_animation()
+            led.stop()
 
         if buzzer:
             buzzer.stop()
@@ -194,7 +194,7 @@ class DeviceFSM:
             if buzzer:
                 buzzer.play(
                     Buzzer.BEEP_CARD_READ,
-                    continuous = True
+                    continuous = True,
                     interval_ms = 1000
                 )
 
