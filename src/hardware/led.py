@@ -1,7 +1,6 @@
 """LED control module with async animations."""
 
 import uasyncio as asyncio
-from micropython import const
 
 
 # Color constants (RGB format)
@@ -39,6 +38,7 @@ class LEDController:
             driver: LED driver instance (Dotstar, NeoPixel, etc.)
         """
         self.driver = driver
+        print(f"[LED] Initialized with driver: {type(driver).__name__}")
 
         # Handle different attribute names
         if hasattr(driver, 'num_leds'):

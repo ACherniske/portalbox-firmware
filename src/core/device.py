@@ -46,7 +46,7 @@ class Device:
         # SPI bus for RFID
         try:
             self.spi = SPI(
-                id = pins.SPI_ID,
+                pins.SPI_ID,
                 baudrate = pins.SPI_BAUDRATE,
                 polarity = 0,
                 phase = 0,
@@ -55,6 +55,7 @@ class Device:
                 miso = Pin(pins.SPI_MISO)
             )
             print("[Device] SPI bus 1 initialized")
+
         except Exception as e:
             print(f"[Device] ERROR: Failed to initialize SPI bus 1: {e}")
             self.spi = None
@@ -62,7 +63,7 @@ class Device:
         # SPI bus for LEDs
         try:
             self.spi_led = SPI(
-                id = pins.SPI_LED_ID,
+                pins.SPI_LED_ID,
                 baudrate = pins.SPI_LED_BAUDRATE,
                 polarity = 0,
                 phase = 0,
@@ -71,6 +72,7 @@ class Device:
                 miso = Pin(pins.SPI_LED_MISO)
             )
             print("[Device] SPI bus 2 initialized")
+
         except Exception as e:
             print(f"[Device] ERROR: Failed to initialize SPI bus 2: {e}")
             self.spi_led = None
@@ -106,6 +108,7 @@ class Device:
         try:
             self.button = Button(pins.BUTTON_PIN)
             print("[Device] Button initialized")
+
         except Exception as e:
             print(f"[Device] ERROR: Failed to initialize button: {e}")
             self.button = None
@@ -115,6 +118,7 @@ class Device:
         try:
             self.buzzer = Buzzer(pins.BUZZER_PIN)
             print("[Device] Buzzer initialized")
+
         except Exception as e:
             print(f"[Device] ERROR: Failed to initialize buzzer: {e}")
             self.buzzer = None
@@ -127,6 +131,7 @@ class Device:
                 pins.RELAY_USB_PIN
             )
             print("[Device] Relay controller initialized")
+
         except Exception as e:
             print(f"[Device] ERROR: Failed to initialize relay controller: {e}")
             self.relay = None
@@ -150,6 +155,7 @@ class Device:
             else:
                 print("[Device] ERROR: RFID reader failed to initialize")
                 self.rfid = None
+
         except Exception as e:
             print(f"[Device] ERROR: Failed to initialize RFID reader: {e}")
             self.rfid = None
@@ -163,7 +169,9 @@ class Device:
 
             # import appropriate LED driver based on settings
             if settings.LED_TYPE == "dotstar":
+
                 from hardware.lib.dotstar import DotStar
+
                 driver = DotStar(
                     spi = self.spi_led,
                     num_leds = settings.LED_COUNT,
@@ -171,7 +179,9 @@ class Device:
                 )
 
             elif settings.LED_TYPE == "neopixel":
+
                 from hardware.lib.neopixel_wrapper import neopixel_wrapper
+
                 driver = neopixel_wrapper(
                     pin = pins.SPI_LED_MOSI, # NeoPixel uses MOSI pin for data
                     num_pixels = settings.LED_COUNT,
@@ -184,6 +194,8 @@ class Device:
 
             # Wrap driver in LEDController for unified API
             self.led = LEDController(driver)
+
+            print("[Device] LED controller initialized")
 
         except Exception as e:
             print(f"[Device] ERROR: Failed to initialize LED controller: {e}")
@@ -203,16 +215,12 @@ class Device:
 
         # Startup beep
         if self.buzzer:
-            self.buzzer.play(
-                (
-                    100,
-                    100,
-                )
-            )
+            self.buzzer.play(Buzzer.BEEP_TRIPLE)
 
         # Startup LED animation
         if self.led:
             self.led.stop()
+
             self.led.wipe(
                 'BLUE',
                 wait_ms = 30,
@@ -237,11 +245,7 @@ class Device:
 
         # Shutdown beep
         if self.buzzer:
-            self.buzzer.play(
-                (
-                    300,
-                )
-            )
+            self.buzzer.play(Buzzer.BEEP_TIMEOUT)
 
         # Turn off relays
         if self.relay:
@@ -251,11 +255,11 @@ class Device:
         if self.rfid:
             self.rfid.stop_crypto()
 
-        # Fully clear LEDs after animation trigger
+        # Clear LEDs
         if self.led:
             self.led.clear()
 
-        # Ensure buzzer is silent
+        # Stop buzzer
         if self.buzzer:
             self.buzzer.stop()
 
@@ -270,7 +274,7 @@ class Device:
 
         self.shutdown_sequence()
 
-        # Deinitialize components
+        # Deinitialize SPI buses
         if self.spi:
             self.spi.deinit()
             self.spi = None
@@ -279,7 +283,15 @@ class Device:
             self.spi_led.deinit()
             self.spi_led = None
 
+        # Clear references
+        self.buzzer = None
+        self.relay = None
+        self.rfid = None
+        self.led = None
+        self.button = None
+
         gc.collect()
+
         print("[Device] Hardware cleanup complete")
 
     # =========================================================================
@@ -305,12 +317,16 @@ class Device:
     def print_status(self):
         """Print hardware status to console."""
         print("\n=== Hardware Status ===")
+
         status = self.get_status()
 
         for component, active in status.items():
+
             if component == 'relay_state':
+
                 if active is not None:
                     print(f"  Relay: {'ON' if active else 'OFF'}")
+
             else:
                 status_str = "OK" if active else "FAILED"
                 print(f"  {component.upper()}: {status_str}")
@@ -323,13 +339,16 @@ _device = None
 def get_device():
     """Get the singleton Device instance, initializing if necessary."""
     global _device
+
     if _device is None:
         _device = Device()
+
     return _device
 
 def cleanup_device():
     """Cleanup the singleton Device instance."""
     global _device
+
     if _device is not None:
         _device.cleanup()
         _device = None
