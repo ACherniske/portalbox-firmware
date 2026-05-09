@@ -8,12 +8,10 @@ from micropython import const
 from core.device import get_device
 from config import settings
 
-# Future API layer
-# from core.api import api
-
 
 class States:
     """FSM state definitions."""
+
     IDLE = const(0)
     AUTH = const(1)
     NOAUTH = const(2)
@@ -21,6 +19,7 @@ class States:
     PROXY = const(4)
     TRAINING = const(5)
     TIMEOUT = const(6)
+
 
 STATE_NAMES = {
     States.IDLE: 'IDLE',
@@ -37,19 +36,21 @@ class DeviceFSM:
     """
     Device finite state machine.
 
-    Handles
+    Handles:
     - User authentication flow
     - Grace period logic
     - Timeout management
     - Relay control
     - LED state indication
     - Buzzer feedback
+
     Future:
     - API interactions for auth and logging
     """
 
     def __init__(self):
-        """Initialize FSM"""
+        """Initialize FSM."""
+
         self.device = get_device()
 
         self.state = States.IDLE
@@ -57,7 +58,6 @@ class DeviceFSM:
         self.current_uid = None
 
         self.state_start_time = time.ticks_ms()
-        self.last_card_seen_time = time.ticks_ms()
 
         self.running = False
 
@@ -66,11 +66,13 @@ class DeviceFSM:
     # =========================================================================
 
     def _set_state(self, new_state):
-        """Transition to a new state.
-        
+        """
+        Transition to a new state.
+
         Args:
             new_state: State enum value
         """
+
         if self.state == new_state:
             return
 
@@ -86,6 +88,7 @@ class DeviceFSM:
 
     def _state_elapsed(self):
         """Get milliseconds elapsed since entering current state."""
+
         return time.ticks_diff(
             time.ticks_ms(),
             self.state_start_time
@@ -93,30 +96,30 @@ class DeviceFSM:
 
     def _device_timeout_expired(self):
         """Check if device timeout has expired."""
-        return self._state_elapsed() >= settings.device_timeout_ms
+
+        return (
+            self._state_elapsed()
+            >= settings.device_timeout_ms
+        )
 
     def _grace_timeout_expired(self):
-        """Check if grace period has expired."""
-        return self._state_elapsed() >= settings.grace_period_ms
+        """Check if grace timeout has expired."""
+
+        return (
+            self._state_elapsed()
+            >= settings.grace_period_ms
+        )
 
     # =========================================================================
     # Hardware State Application
     # =========================================================================
 
     def _apply_state(self):
-        """Apply hardware behavior for active state."""
+        """Apply hardware behavior for current state."""
 
-        led = self.device.led
-        buzzer = self.device.buzzer
-        relay = self.device.relay
-
-        # Stop previous animations/sounds
-        if led:
-            led.stop()
-
-        if buzzer:
-            buzzer.stop()
-
+        # Stop existing effects first
+        self.device.led_stop()
+        self.device.buzzer_stop()
 
         # =========================================================
         # IDLE
@@ -124,16 +127,14 @@ class DeviceFSM:
 
         if self.state == States.IDLE:
 
-            if relay:
-                relay.turn_off()
+            self.device.relays_off()
 
-            if led:
-                led.pulse(
-                    'BLUE',
-                    min_brightness = 0.05,
-                    max_brightness = 0.3,
-                    step = 0.02
-                )
+            self.device.led_pulse(
+                'BLUE',
+                min_brightness = 0.05,
+                max_brightness = 0.30,
+                step = 0.02
+            )
 
         # =========================================================
         # AUTH
@@ -141,19 +142,16 @@ class DeviceFSM:
 
         elif self.state == States.AUTH:
 
-            if relay:
-                relay.turn_on()
+            self.device.relays_on()
 
-            if led:
-                led.pulse(
-                    'GREEN',
-                    min_brightness = 0.05,
-                    max_brightness = 0.4,
-                    step = 0.02
-                )
+            self.device.led_pulse(
+                'GREEN',
+                min_brightness = 0.05,
+                max_brightness = 0.40,
+                step = 0.02
+            )
 
-            if buzzer:
-                buzzer.play(Buzzer.BEEP_CARD_READ)
+            self.device.buzzer_card_read()
 
         # =========================================================
         # NOAUTH
@@ -161,19 +159,16 @@ class DeviceFSM:
 
         elif self.state == States.NOAUTH:
 
-            if relay:
-                relay.turn_off()
+            self.device.relays_off()
 
-            if led:
-                led.pulse(
-                    'RED',
-                    min_brightness = 0.05,
-                    max_brightness = 0.4,
-                    step = 0.02
-                )
+            self.device.led_pulse(
+                'RED',
+                min_brightness = 0.05,
+                max_brightness = 0.40,
+                step = 0.02
+            )
 
-            if buzzer:
-                buzzer.play(Buzzer.BEEP_TIMEOUT)
+            self.device.buzzer_timeout()
 
         # =========================================================
         # GRACE
@@ -181,22 +176,17 @@ class DeviceFSM:
 
         elif self.state == States.GRACE:
 
-            if relay:
-                relay.turn_on()
+            self.device.relays_on()
 
-            if led:
-                led.blink(
-                    'YELLOW',
-                    on_ms = 500,
-                    off_ms = 500
-                )
+            self.device.led_blink(
+                'YELLOW',
+                on_ms = 500,
+                off_ms = 500
+            )
 
-            if buzzer:
-                buzzer.play(
-                    Buzzer.BEEP_CARD_READ,
-                    continuous = True,
-                    interval_ms = 1000
-                )
+            self.device.buzzer_card_repeat(
+                interval_ms = 1000
+            )
 
         # =========================================================
         # PROXY
@@ -204,19 +194,16 @@ class DeviceFSM:
 
         elif self.state == States.PROXY:
 
-            if relay:
-                relay.turn_on()
+            self.device.relays_on()
 
-            if led:
-                led.pulse(
-                    'ORANGE',
-                    min_brightness = 0.05,
-                    max_brightness = 0.4,
-                    step = 0.02
-                )
+            self.device.led_pulse(
+                'ORANGE',
+                min_brightness = 0.05,
+                max_brightness = 0.40,
+                step = 0.02
+            )
 
-            if buzzer:
-                buzzer.play(Buzzer.BEEP_CARD_READ)
+            self.device.buzzer_card_read()
 
         # =========================================================
         # TRAINING
@@ -224,19 +211,16 @@ class DeviceFSM:
 
         elif self.state == States.TRAINING:
 
-            if relay:
-                relay.turn_on()
+            self.device.relays_on()
 
-            if led:
-                led.pulse(
-                    'PURPLE',
-                    min_brightness = 0.05,
-                    max_brightness = 0.4,
-                    step = 0.02
-                )
+            self.device.led_pulse(
+                'PURPLE',
+                min_brightness = 0.05,
+                max_brightness = 0.40,
+                step = 0.02
+            )
 
-            if buzzer:
-                buzzer.play(Buzzer.BEEP_CARD_READ)
+            self.device.buzzer_card_read()
 
         # =========================================================
         # TIMEOUT
@@ -244,22 +228,17 @@ class DeviceFSM:
 
         elif self.state == States.TIMEOUT:
 
-            if relay:
-                relay.turn_off()
+            self.device.relays_off()
 
-            if led:
-                led.blink(
-                    'RED',
-                    on_ms = 250,
-                    off_ms = 250
-                )
+            self.device.led_blink(
+                'RED',
+                on_ms = 250,
+                off_ms = 250
+            )
 
-            if buzzer:
-                buzzer.play(
-                    Buzzer.BEEP_TIMEOUT, 
-                    continuous=True,
-                    interval_ms=1000
-                )
+            self.device.buzzer_timeout_repeat(
+                interval_ms = 1000
+            )
 
     # =========================================================================
     # Card Handling
@@ -272,32 +251,34 @@ class DeviceFSM:
         Returns:
             UID string or None
         """
-        if not self.device.rfid:
-            return None
 
-        return self.device.rfid.read_card()
+        return self.device.read_card()
 
     def _card_present(self):
         """Check if a card is currently present."""
+
         return self._read_card() is not None
 
     # =========================================================================
     # Future API Hooks
-    # ========================================================================
+    # =========================================================================
 
     def _is_auth(self, uid):
-        """Check if UID is authorized via API."""
-        # Future implementation
+        """Check if UID is authorized."""
+
+        # Future API implementation
         return False
 
     def _is_trainer(self, uid):
-        """Check if UID is a trainer card via API."""
-        # Future implementation
+        """Check if UID is trainer card."""
+
+        # Future API implementation
         return False
 
     def _is_proxy(self, uid):
-        """Check if UID is a proxy card via API."""
-        # Future implementation
+        """Check if UID is proxy card."""
+
+        # Future API implementation
         return False
 
     # =========================================================================
@@ -305,7 +286,7 @@ class DeviceFSM:
     # =========================================================================
 
     async def update(self):
-        """Self FSM update tick."""
+        """FSM update tick."""
 
         uid = self._read_card()
 
@@ -318,12 +299,18 @@ class DeviceFSM:
             if uid:
 
                 if self._is_auth(uid):
+
                     self.current_uid = uid
-                    self._set_state(States.AUTH)
+
+                    self._set_state(
+                        States.AUTH
+                    )
 
                 else:
-                    self._set_state(States.NOAUTH)
 
+                    self._set_state(
+                        States.NOAUTH
+                    )
 
         # =========================================================
         # AUTH
@@ -332,10 +319,16 @@ class DeviceFSM:
         elif self.state == States.AUTH:
 
             if not uid:
-                self._set_state(States.GRACE)
+
+                self._set_state(
+                    States.GRACE
+                )
 
             elif self._device_timeout_expired():
-                self._set_state(States.TIMEOUT)
+
+                self._set_state(
+                    States.TIMEOUT
+                )
 
         # =========================================================
         # NOAUTH
@@ -344,7 +337,10 @@ class DeviceFSM:
         elif self.state == States.NOAUTH:
 
             if not uid:
-                self._set_state(States.IDLE)
+
+                self._set_state(
+                    States.IDLE
+                )
 
         # =========================================================
         # GRACE
@@ -352,27 +348,45 @@ class DeviceFSM:
 
         elif self.state == States.GRACE:
 
-            if self.device.button and self.device.button.is_pressed:
-                self._set_state(States.IDLE)
+            if self.device.button_pressed:
+
+                self._set_state(
+                    States.IDLE
+                )
 
             elif self._grace_timeout_expired():
-                self._set_state(States.IDLE)
+
+                self._set_state(
+                    States.IDLE
+                )
 
             elif uid:
 
                 if self._is_proxy(uid):
-                    self._set_state(States.PROXY)
+
+                    self._set_state(
+                        States.PROXY
+                    )
 
                 elif self._is_auth(uid):
-                    
+
                     if self._is_trainer(uid):
-                        self._set_state(States.TRAINING)
+
+                        self._set_state(
+                            States.TRAINING
+                        )
 
                     else:
-                        self._set_state(States.AUTH)
+
+                        self._set_state(
+                            States.AUTH
+                        )
 
                 else:
-                    self._set_state(States.NOAUTH)
+
+                    self._set_state(
+                        States.NOAUTH
+                    )
 
         # =========================================================
         # PROXY
@@ -381,10 +395,16 @@ class DeviceFSM:
         elif self.state == States.PROXY:
 
             if not uid:
-                self._set_state(States.GRACE)
+
+                self._set_state(
+                    States.GRACE
+                )
 
             elif self._device_timeout_expired():
-                self._set_state(States.TIMEOUT)
+
+                self._set_state(
+                    States.TIMEOUT
+                )
 
         # =========================================================
         # TRAINING
@@ -393,7 +413,10 @@ class DeviceFSM:
         elif self.state == States.TRAINING:
 
             if not uid:
-                self._set_state(States.IDLE)
+
+                self._set_state(
+                    States.IDLE
+                )
 
         # =========================================================
         # TIMEOUT
@@ -402,7 +425,10 @@ class DeviceFSM:
         elif self.state == States.TIMEOUT:
 
             if not uid:
-                self._set_state(States.IDLE)
+
+                self._set_state(
+                    States.IDLE
+                )
 
     # =========================================================================
     # Main Loop
@@ -410,26 +436,30 @@ class DeviceFSM:
 
     async def run(self):
         """Run FSM loop."""
+
         print("[FSM] Starting main loop")
 
         self.running = True
 
+        # Apply initial state
         self._apply_state()
 
         while self.running:
+
             await self.update()
+
             await asyncio.sleep_ms(100)
 
     def stop(self):
         """Stop FSM loop."""
+
         print("[FSM] Stopping main loop")
+
         self.running = False
 
-        if self.device.led:
-            self.device.led.stop()
-            self.device.led.clear()
+        self.device.led_stop()
+        self.device.led_clear()
 
-        if self.device.buzzer:
-            self.device.buzzer.stop()
+        self.device.buzzer_stop()
 
         print("[FSM] FSM stopped and hardware reset")

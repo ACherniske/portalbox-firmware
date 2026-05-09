@@ -295,6 +295,190 @@ class Device:
         print("[Device] Hardware cleanup complete")
 
     # =========================================================================
+    # Unified Hardware API
+    # =========================================================================
+
+    def relays_on(self):
+        """Turn on all relays."""
+        if self.relay:
+            self.relay.turn_on()
+
+    def relays_off(self):
+        """Turn off all relays."""
+        if self.relay:
+            self.relay.turn_off()
+
+    @property
+    def relays_enabled(self):
+        """Get relay state"""
+        if self.relay:
+            return self.relay.state
+        return None
+
+    def led_fill(self, color):
+        """Fill all LEDs with a color."""
+        if self.led:
+            self.led.fill(color)
+
+    def led_clear(self):
+        """Turn off all LEDs."""
+        if self.led:
+            self.led.clear()
+
+    def led_stop(self):
+        """Stop any active LED animations."""
+        if self.led:
+            self.led.stop()
+
+    def led_pulse(
+        self,
+        color,
+        min_brightness = 0.05,
+        max_brightness = 0.4,
+        step = 0.02,
+        interval_ms = 50
+    ):
+        """Start a pulsing animation on the LEDs."""
+        if self.led:
+            self.led.pulse(
+                color,
+                min_brightness = min_brightness,
+                max_brightness = max_brightness,
+                step = step,
+                interval_ms = interval_ms
+            )
+
+    def led_blink(
+        self,
+        color,
+        count = None,
+        on_ms = 250,
+        off_ms = 250
+    ):
+        """Start a blinking animation on the LEDs."""
+        if self.led:
+            self.led.blink(
+                color,
+                count = count,
+                on_ms = on_ms,
+                off_ms = off_ms
+            )
+
+    def led_chase(
+        self,
+        color,
+        background = 'OFF',
+        wait_ms = 50,
+        continuous = True
+    ):
+        """Start a chasing animation on the LEDs."""
+        if self.led:
+            self.led.chase(
+                color,
+                background = background,
+                wait_ms = wait_ms,
+                continuous = continuous
+            )
+
+    def led_wipe(
+        self,
+        color,
+        wait_ms = 50,
+        clear_after = False
+    ):
+        """Start a wiping animation on the LEDs."""
+        if self.led:
+            self.led.wipe(
+                color,
+                wait_ms = wait_ms,
+                clear_after = clear_after
+            )
+
+    def led_rainbow(
+        self,
+        wait_ms = 50,
+        continuous = True
+    ):
+        """Start a rainbow animation on the LEDs."""
+        if self.led:
+            self.led.rainbow(
+                wait_ms = wait_ms,
+                continuous = continuous
+            )
+
+    def buzzer_play(
+        self,
+        pattern,
+        repeat = 1,
+        continuous = False,
+        interval_ms = 1000
+    ):
+        """Play a buzzer pattern."""
+        if self.buzzer:
+            self.buzzer.play(
+                pattern,
+                repeat = repeat,
+                continuous = continuous,
+                interval_ms = interval_ms
+            )
+
+    def buzzer_stop(self):
+        """Stop any buzzer patterns."""
+        if self.buzzer:
+            self.buzzer.stop()
+
+    def buzzer_card_read(self):
+        """Play card read buzzer pattern."""
+        if self.buzzer:
+            self.buzzer.play(Buzzer.BEEP_CARD_READ)
+
+    def buzzer_timeout(self):
+        """Play timeout buzzer pattern."""
+        if self.buzzer:
+            self.buzzer.play(Buzzer.BEEP_TIMEOUT)
+
+    def buzzer_triple(self):
+        """Play triple beep buzzer pattern."""
+        if self.buzzer:
+            self.buzzer.play(Buzzer.BEEP_TRIPLE)
+
+    def buzzer_card_repeat(self, interval_ms = 1000):
+    if self.buzzer:
+        self.buzzer.play(
+            Buzzer.BEEP_CARD_READ,
+            continuous = True,
+            interval_ms = interval_ms
+        )
+
+    def buzzer_timeout_repeat(self, interval_ms = 1000):
+        if self.buzzer:
+            self.buzzer.play(
+                Buzzer.BEEP_TIMEOUT,
+                continuous = True,
+                interval_ms = interval_ms
+            )
+
+    @property
+    def button_pressed(self):
+        """Check if button is currently pressed."""
+        if self.button:
+            return self.button.is_pressed
+
+        return False
+
+    def read_card(self):
+        """Read RFID card UID."""
+        if self.rfid:
+            return self.rfid.read_card()
+
+        return None
+
+    def stop_crypto(self):
+        """Stop RFID crypto session."""
+        if self.rfid:
+            self.rfid.stop_crypto()
+
+    # =========================================================================
     # Component status methods
     # =========================================================================
 
