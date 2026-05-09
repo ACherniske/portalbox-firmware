@@ -443,12 +443,12 @@ class Device:
             self.buzzer.play(Buzzer.BEEP_TRIPLE)
 
     def buzzer_card_repeat(self, interval_ms = 1000):
-    if self.buzzer:
-        self.buzzer.play(
-            Buzzer.BEEP_CARD_READ,
-            continuous = True,
-            interval_ms = interval_ms
-        )
+        if self.buzzer:
+            self.buzzer.play(
+                Buzzer.BEEP_CARD_READ,
+                continuous = True,
+                interval_ms = interval_ms
+            )
 
     def buzzer_timeout_repeat(self, interval_ms = 1000):
         if self.buzzer:
