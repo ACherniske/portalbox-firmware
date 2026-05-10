@@ -1,126 +1,103 @@
 # boot.py
-# Runs on boot to initialize WiFi and hand off OTA scheduling to net.ota.
+# Minimal bootloader / safe-mode entry point.
 
-import sys
+import time
+import machine
 
-from net import WiFiConfig, WifiManager, ota
-from core import main
-
-
-def _print_banner():
-    """Display boot metadata."""
-    print('\n' + '=' * 60)
-    print('PortalBox Firmware - Boot Sequence')
-    print('=' * 60)
-    print('MicroPython: %s' % sys.version)
-    print('Platform: %s' % sys.platform)
-    print('=' * 60)
+SAFE_MODE_PIN = 0          # BOOT button on many ESP32 boards
+SAFE_MODE_HOLD_MS = 3000   # Hold duration to enter safe mode
 
 
-def _load_wifi_config(config):
-    """Load the device WiFi configuration."""
-    print('[BOOT] Loading WiFi configuration...')
-    if not config.load():
-        print('[BOOT] ERROR: Failed to load WiFi configuration')
-        print('[BOOT] Please configure WiFi settings in /config/wifi_config.json')
-        sys.exit(1)
+def _safe_mode_requested():
+    """
+    Check if the BOOT button is being held.
 
-    print('[BOOT] Configuration loaded: %s' % config.ssid)
+    Returns:
+        bool: True if safe mode requested
+    """
 
-
-def _get_password(config):
-    """Return the decrypted WiFi password or stop boot if unavailable."""
-    print('[BOOT] Decrypting password...')
-    password = config.get_decrypted_password()
-    if not password:
-        print('[BOOT] ERROR: Failed to decrypt password from configuration')
-        sys.exit(1)
-
-    print('[BOOT] Password successfully decrypted')
-    return password
-
-
-def _connect_wifi(config, password):
-    """Connect to the configured WiFi network."""
-    print('[BOOT] Initializing WiFi manager...')
-    wifi = WifiManager(config=config, verbose=True)
-
-    print('[BOOT] Connecting to network...')
-    if not wifi.connect_with_retry(password):
-        print('\n' + '=' * 60)
-        print('WIFI CONNECTION FAILED')
-        print('=' * 60)
-
-        status = wifi.get_status()
-        if 'last_error' in status:
-            print('Error: %s' % status['last_error'])
-
-        print('\n[BOOT] Boot sequence failed. System halted.')
-        print('=' * 60)
-        sys.exit(1)
-
-    return wifi
-
-
-def _print_connection_status(wifi):
-    """Print connection details after WiFi is up."""
-    print('\n' + '=' * 60)
-    print('WIFI CONNECTION SUCCESSFUL')
-    print('=' * 60)
-
-    status = wifi.get_status()
-    print('SSID: %s' % status['ssid'])
-    print('Network Type: %s' % status['network_type'])
-    print('IP Address: %s' % status['ip'])
-    print('Gateway: %s' % status['gateway'])
-    print('DNS: %s' % status['dns'])
-    print('=' * 60)
-
-
-def _fmt_size(size_bytes):
-    """Format bytes as a compact human-readable string."""
     try:
-        size = float(size_bytes)
-    except Exception:
-        return str(size_bytes)
-    if size < 1024:
-        return '%d B' % int(size)
-    for unit in ['KB', 'MB', 'GB', 'TB']:
-        size = size / 1024.0
-        if size < 1024.0:
-            return '%.1f %s' % (size, unit)
-    return '%.1f PB' % size
+        button = machine.Pin(
+            SAFE_MODE_PIN,
+            machine.Pin.IN,
+            machine.Pin.PULL_UP
+        )
 
+        start = time.ticks_ms()
 
-def _print_storage_info():
-    """Print total, used, and free storage for debugging."""
-    try:
-        total, free, used = ota._get_storage_info()
-        print('\n' + '=' * 60)
-        print('STORAGE INFO')
-        print('=' * 60)
-        print('Total: %s' % _fmt_size(total))
-        print('Used:  %s' % _fmt_size(used))
-        print('Free:  %s' % _fmt_size(free))
-        print('=' * 60)
+        while time.ticks_diff(
+            time.ticks_ms(),
+            start
+        ) < SAFE_MODE_HOLD_MS:
+
+            # Button pressed (active low)
+            if button.value():
+                return False
+
+            time.sleep_ms(50)
+
+        return True
+
     except Exception as error:
-        print('[BOOT] Storage check failed: %s' % error)
+        print("[BOOT] Safe mode check failed:", error)
+        return False
+
+
+def _safe_mode():
+    """
+    Enter safe mode.
+
+    Safe mode:
+    - skips WiFi
+    - skips OTA
+    - skips main app
+    - leaves REPL available over USB/COM
+    """
+
+    print("\n" + "=" * 60)
+    print("SAFE MODE ENABLED")
+    print("=" * 60)
+    print("WiFi startup skipped")
+    print("OTA skipped")
+    print("Main application skipped")
+    print("REPL active over USB/COM")
+    print("=" * 60)
+
+    # Idle forever so REPL stays accessible
+    while True:
+        time.sleep(1)
 
 
 def launch():
-    """Execute the boot sequence."""
-    _print_banner()
+    """Boot entry point."""
 
-    config = WiFiConfig()
-    _load_wifi_config(config)
-    password = _get_password(config)
-    wifi = _connect_wifi(config, password)
-    _print_connection_status(wifi)
-    _print_storage_info()
+    print("\n[BOOT] PortalBox bootloader starting...")
 
-    ota.run_daily_update_if_due(isconnected=True, reset_after=False)
-    print('\n[BOOT] Boot sequence complete. Launching main application.')
-    main()
+    # Give time to interrupt boot from COM
+    print("[BOOT] Hold BOOT button for safe mode...")
+    time.sleep_ms(1500)
+
+    if _safe_mode_requested():
+        _safe_mode()
+        return
+
+    try:
+        print("[BOOT] Launching system manager...")
+
+        from core.system import boot
+
+        boot()
+
+    except Exception as error:
+        print("\n" + "=" * 60)
+        print("BOOT FAILURE")
+        print("=" * 60)
+        print(error)
+        print("=" * 60)
+
+        # Keep REPL alive after crash
+        while True:
+            time.sleep(1)
 
 
 launch()

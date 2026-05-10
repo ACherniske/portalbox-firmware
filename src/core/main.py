@@ -7,6 +7,7 @@ import uasyncio as asyncio
 
 from core.device import get_device, cleanup_device
 from core.fsm import DeviceFSM
+from core.system import boot
 
 
 class Application:
