@@ -5,8 +5,12 @@ import time
 import uasyncio as asyncio
 
 from micropython import const
+
 from core.device import get_device
 from config import settings
+
+# Mock API layer
+from core import api
 
 
 class States:
@@ -35,17 +39,6 @@ STATE_NAMES = {
 class DeviceFSM:
     """
     Device finite state machine.
-
-    Handles:
-    - User authentication flow
-    - Grace period logic
-    - Timeout management
-    - Relay control
-    - LED state indication
-    - Buzzer feedback
-
-    Future:
-    - API interactions for auth and logging
     """
 
     def __init__(self):
@@ -55,7 +48,12 @@ class DeviceFSM:
 
         self.state = States.IDLE
 
+        # Main authenticated user
         self.current_uid = None
+
+        # Training session data
+        self.trainer_uid = None
+        self.trainee_uid = None
 
         self.state_start_time = time.ticks_ms()
 
@@ -76,12 +74,43 @@ class DeviceFSM:
         if self.state == new_state:
             return
 
-        old_name = STATE_NAMES[self.state]
+        old_state = self.state
+
+        old_name = STATE_NAMES[old_state]
         new_name = STATE_NAMES[new_state]
 
         print(f"[FSM] State change: {old_name} -> {new_name}")
 
+        # =========================================================
+        # EXIT EVENTS
+        # =========================================================
+
+        if (
+            new_state == States.IDLE
+            and old_state in (
+                States.AUTH,
+                States.GRACE,
+                States.PROXY,
+                States.TRAINING,
+                States.TIMEOUT
+            )
+        ):
+
+            if self.current_uid:
+                api.log_session_end(
+                    self.current_uid
+                )
+
+            self.current_uid = None
+            self.trainer_uid = None
+            self.trainee_uid = None
+
+        # =========================================================
+        # APPLY NEW STATE
+        # =========================================================
+
         self.state = new_state
+
         self.state_start_time = time.ticks_ms()
 
         self._apply_state()
@@ -260,26 +289,23 @@ class DeviceFSM:
         return self._read_card() is not None
 
     # =========================================================================
-    # Future API Hooks
+    # API Hooks
     # =========================================================================
 
     def _is_auth(self, uid):
         """Check if UID is authorized."""
 
-        # Future API implementation
-        return False
+        return api.is_auth(uid)
 
     def _is_trainer(self, uid):
         """Check if UID is trainer card."""
 
-        # Future API implementation
-        return False
+        return api.is_trainer(uid)
 
     def _is_proxy(self, uid):
         """Check if UID is proxy card."""
 
-        # Future API implementation
-        return False
+        return api.is_proxy(uid)
 
     # =========================================================================
     # FSM Update Logic
@@ -298,15 +324,29 @@ class DeviceFSM:
 
             if uid:
 
+                print(f"[FSM] Card detected: {uid}")
+
+                # -------------------------------------------------
+                # Authorized User
+                # -------------------------------------------------
+
                 if self._is_auth(uid):
 
                     self.current_uid = uid
+
+                    api.log_session_start(uid)
 
                     self._set_state(
                         States.AUTH
                     )
 
+                # -------------------------------------------------
+                # Unauthorized User
+                # -------------------------------------------------
+
                 else:
+
+                    api.log_session_fail(uid)
 
                     self._set_state(
                         States.NOAUTH
@@ -348,11 +388,19 @@ class DeviceFSM:
 
         elif self.state == States.GRACE:
 
+            # -----------------------------------------------------
+            # Manual cancel button
+            # -----------------------------------------------------
+
             if self.device.button_pressed:
 
                 self._set_state(
                     States.IDLE
                 )
+
+            # -----------------------------------------------------
+            # Grace timeout expired
+            # -----------------------------------------------------
 
             elif self._grace_timeout_expired():
 
@@ -360,29 +408,76 @@ class DeviceFSM:
                     States.IDLE
                 )
 
+            # -----------------------------------------------------
+            # Card scanned during grace
+            # -----------------------------------------------------
+
             elif uid:
 
-                if self._is_proxy(uid):
+                print(f"[FSM] Grace card detected: {uid}")
+
+                # =================================================
+                # TRAINING FLOW
+                #
+                # Trainer authenticates first:
+                #
+                # Trainer card -> AUTH
+                # Remove card -> GRACE
+                # Trainee card -> TRAINING
+                # =================================================
+
+                if (
+                    self.current_uid
+                    and self._is_trainer(self.current_uid)
+                ):
+
+                    self.trainer_uid = self.current_uid
+
+                    self.trainee_uid = uid
+
+                    api.log_training_start(
+                        self.trainer_uid,
+                        self.trainee_uid
+                    )
+
+                    self._set_state(
+                        States.TRAINING
+                    )
+
+                # =================================================
+                # PROXY FLOW
+                # =================================================
+
+                elif self._is_proxy(uid):
+
+                    api.log_proxy_start(
+                        uid,
+                        self.current_uid
+                    )
 
                     self._set_state(
                         States.PROXY
                     )
 
+                # =================================================
+                # NORMAL AUTH FLOW
+                # =================================================
+
                 elif self._is_auth(uid):
 
-                    if self._is_trainer(uid):
+                    self.current_uid = uid
 
-                        self._set_state(
-                            States.TRAINING
-                        )
+                    self._set_state(
+                        States.AUTH
+                    )
 
-                    else:
-
-                        self._set_state(
-                            States.AUTH
-                        )
+                # =================================================
+                # UNAUTHORIZED
+                # =================================================
 
                 else:
+
+                    api.log_session_fail(uid)
 
                     self._set_state(
                         States.NOAUTH
@@ -461,5 +556,7 @@ class DeviceFSM:
         self.device.led_clear()
 
         self.device.buzzer_stop()
+
+        self.device.relays_off()
 
         print("[FSM] FSM stopped and hardware reset")
