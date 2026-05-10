@@ -4,6 +4,7 @@
 import sys
 
 from net import WiFiConfig, WifiManager, ota
+from core import main
 
 
 def _print_banner():
@@ -106,7 +107,7 @@ def _print_storage_info():
         print('[BOOT] Storage check failed: %s' % error)
 
 
-def main():
+def launch():
     """Execute the boot sequence."""
     _print_banner()
 
@@ -118,7 +119,8 @@ def main():
     _print_storage_info()
 
     ota.run_daily_update_if_due(isconnected=True, reset_after=False)
-    print('\n[BOOT] Boot sequence complete. Ready for operation.')
+    print('\n[BOOT] Boot sequence complete. Launching main application.')
+    main()
 
 
-main()
+launch()
