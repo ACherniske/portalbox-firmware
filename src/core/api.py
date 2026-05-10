@@ -25,7 +25,7 @@ USERS = {
     # Normal authorized user
     # =========================================================
 
-    'PUT_UID_HERE_1': {
+    '23BE9603': {
         'name': 'Authorized User',
         'auth': True,
         'trainer': False,
@@ -36,7 +36,7 @@ USERS = {
     # Trainer card
     # =========================================================
 
-    'PUT_UID_HERE_2': {
+    '73889103': {
         'name': 'Trainer User',
         'auth': True,
         'trainer': True,
@@ -47,7 +47,7 @@ USERS = {
     # Proxy card
     # =========================================================
 
-    'PUT_UID_HERE_3': {
+    'C38EC002': {
         'name': 'Proxy User',
         'auth': True,
         'trainer': False,
@@ -58,7 +58,7 @@ USERS = {
     # Unauthorized card
     # =========================================================
 
-    'PUT_UID_HERE_4': {
+    '83EE8F03': {
         'name': 'Unauthorized User',
         'auth': False,
         'trainer': False,
