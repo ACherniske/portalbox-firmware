@@ -1,8 +1,28 @@
 [
   "src/boot.py",
+
   "src/net/__init__.py",
   "src/net/crypto.py",
   "src/net/models.py",
   "src/net/wifi.py",
-  "src/net/ota.py"
+  "src/net/ota.py",
+
+  "src/core/api.py",
+  "src/core/device.py",
+  "src/core/fsm.py",
+  "src/core/main.py",
+
+  "src/hardware/button.py",
+  "src/hardware/buzzer.py",
+  "src/hardware/led.py",
+  "src/hardware/relay.py",
+  "src/hardware/rfid.py",
+  "src/hardware/lib/dotstar.py",
+  "src/hardware/lib/mfrc522.py",
+  "src/hardware/lib/neopixel_wrapper.py",
+
+  "src/config/example_ota_config.json",
+  "src/config/example_wifi_config.json",
+  "src/config/pins.py",
+  "src/config/settings.py"
 ]
