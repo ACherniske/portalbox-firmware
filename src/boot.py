@@ -17,21 +17,32 @@ def _safe_mode_requested():
     """
 
     try:
-        button = machine.Pin(
-            SAFE_MODE_PIN,
-            machine.Pin.IN,
-            machine.Pin.PULL_UP
-        )
+        # Build list of pins to check: the BOOT pin plus a configurable box button
+        pin_nums = [SAFE_MODE_PIN]
+
+        try:
+            from config.pins import BUTTON_PIN
+            if BUTTON_PIN not in pin_nums:
+                pin_nums.append(BUTTON_PIN)
+        except Exception:
+            # If config/pins isn't available, fall back to just the SAFE_MODE_PIN
+            pass
+
+        pins = [
+            machine.Pin(n, machine.Pin.IN, machine.Pin.PULL_UP)
+            for n in pin_nums
+        ]
+
+        # Require at least one button to be held (active low) continuously
+        # for the full hold duration.
+        if not any(p.value() == 0 for p in pins):
+            return False
 
         start = time.ticks_ms()
 
-        while time.ticks_diff(
-            time.ticks_ms(),
-            start
-        ) < SAFE_MODE_HOLD_MS:
-
-            # Button pressed (active low)
-            if button.value():
+        while time.ticks_diff(time.ticks_ms(), start) < SAFE_MODE_HOLD_MS:
+            # If none of the buttons remain pressed, abort
+            if not any(p.value() == 0 for p in pins):
                 return False
 
             time.sleep_ms(50)
