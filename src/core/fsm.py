@@ -466,18 +466,43 @@ class DeviceFSM:
                     and self._is_trainer(self.current_uid)
                 ):
 
-                    self.trainer_uid = self.current_uid
+                    # Trainer tapped again: resume existing trainer session.
+                    if uid == self.current_uid:
 
-                    self.trainee_uid = uid
+                        self._set_state(
+                            States.AUTH
+                        )
 
-                    api.log_training_start(
-                        self.trainer_uid,
-                        self.trainee_uid
-                    )
+                    # Another authorized user tapped: hand off session.
+                    elif self._is_auth(uid):
 
-                    self._set_state(
-                        States.TRAINING
-                    )
+                        api.log_session_end(
+                            self.current_uid
+                        )
+
+                        self.current_uid = uid
+
+                        api.log_session_start(uid)
+
+                        self._set_state(
+                            States.AUTH
+                        )
+
+                    # Non-authorized card while trainer is active: training flow.
+                    else:
+
+                        self.trainer_uid = self.current_uid
+
+                        self.trainee_uid = uid
+
+                        api.log_training_start(
+                            self.trainer_uid,
+                            self.trainee_uid
+                        )
+
+                        self._set_state(
+                            States.TRAINING
+                        )
 
                 # =================================================
                 # PROXY FLOW

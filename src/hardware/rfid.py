@@ -28,6 +28,7 @@ class RFIDReader:
         self.last_uid = None
         self.last_read_time = 0
         self.debounce_ms = debounce_ms
+        self.read_retries = 3
 
         if self.reader.initialized:
             print("[RFID] Initialized MFRC522")
@@ -67,24 +68,30 @@ class RFIDReader:
             Hex string UID or None if no card or within debounce period
         """
         try:
-            (status, uid) = self.detect_card()
+            for attempt in range(self.read_retries):
 
-            if status == self.reader.OK and uid is not None:
-                # Convert UID to hex string
-                uid_str = ''.join([f'{b:02X}' for b in uid])
+                (status, uid) = self.detect_card()
 
-                # Debounce check
-                current_time = time.ticks_ms()
-                if (uid_str == self.last_uid and
-                    time.ticks_diff(current_time, self.last_read_time) <
-                        self.debounce_ms):
-                    return None
+                if status == self.reader.OK and uid is not None:
+                    # Convert UID to hex string
+                    uid_str = ''.join([f'{b:02X}' for b in uid])
 
-                self.last_uid = uid_str
-                self.last_read_time = current_time
+                    # Debounce check
+                    current_time = time.ticks_ms()
+                    if (uid_str == self.last_uid and
+                        time.ticks_diff(current_time, self.last_read_time) <
+                            self.debounce_ms):
+                        return None
 
-                print(f"[RFID] Card detected: {uid_str}")
-                return uid_str
+                    self.last_uid = uid_str
+                    self.last_read_time = current_time
+
+                    print(f"[RFID] Card detected: {uid_str}")
+                    return uid_str
+
+                # Small delay between attempts helps transient anticollision/select misses.
+                if attempt + 1 < self.read_retries:
+                    time.sleep_ms(5)
 
         except Exception as e:
             print(f"[RFID] Error: {e}")

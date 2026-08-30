@@ -17,7 +17,7 @@ LED_COUNT = const(10)  # Number of LEDs in the strip
 LED_BRIGHTNESS = const(31)
 
 # RFID Settings
-RFID_DEBOUNCE_MS = const(1000)  # Minimum time between reads of the same tag in milliseconds
+RFID_DEBOUNCE_MS = const(250)  # Minimum time between reads of the same tag in milliseconds
 
 # Device Timeouts
 GRACE_TIMEOUT_MS = const(30000) # Time to wait when in grace period before going to idle (30s)
