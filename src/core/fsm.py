@@ -59,6 +59,11 @@ class DeviceFSM:
 
         self.running = False
 
+        # Require consecutive absent polls before treating card as removed.
+        # With 100ms loop interval and value 3, removal must be absent ~300ms.
+        self._card_absent_polls = 0
+        self._card_absent_polls_required = 3
+
     # =========================================================================
     # Utility Methods
     # =========================================================================
@@ -113,6 +118,9 @@ class DeviceFSM:
 
         self.state_start_time = time.ticks_ms()
 
+        # Reset removal debounce when entering a new state.
+        self._card_absent_polls = 0
+
         self._apply_state()
 
     def _state_elapsed(self):
@@ -126,17 +134,43 @@ class DeviceFSM:
     def _device_timeout_expired(self):
         """Check if device timeout has expired."""
 
+        device_timeout_ms = getattr(
+            settings,
+            'DEVICE_TIMEOUT_MS',
+            getattr(settings, 'device_timeout_ms', 0)
+        )
+
         return (
             self._state_elapsed()
-            >= settings.device_timeout_ms
+            >= device_timeout_ms
         )
 
     def _grace_timeout_expired(self):
         """Check if grace timeout has expired."""
 
+        grace_timeout_ms = getattr(
+            settings,
+            'GRACE_TIMEOUT_MS',
+            getattr(settings, 'grace_period_ms', 0)
+        )
+
         return (
             self._state_elapsed()
-            >= settings.grace_period_ms
+            >= grace_timeout_ms
+        )
+
+    def _card_removed(self, card_present):
+        """Debounced card-removal detector for stable state transitions."""
+
+        if card_present:
+            self._card_absent_polls = 0
+            return False
+
+        self._card_absent_polls += 1
+
+        return (
+            self._card_absent_polls
+            >= self._card_absent_polls_required
         )
 
     # =========================================================================
@@ -286,7 +320,7 @@ class DeviceFSM:
     def _card_present(self):
         """Check if a card is currently present."""
 
-        return self._read_card() is not None
+        return self.device.card_present()
 
     # =========================================================================
     # API Hooks
@@ -315,6 +349,7 @@ class DeviceFSM:
         """FSM update tick."""
 
         uid = self._read_card()
+        card_present = self._card_present()
 
         # =========================================================
         # IDLE
@@ -358,7 +393,7 @@ class DeviceFSM:
 
         elif self.state == States.AUTH:
 
-            if not uid:
+            if self._card_removed(card_present):
 
                 self._set_state(
                     States.GRACE
@@ -376,7 +411,7 @@ class DeviceFSM:
 
         elif self.state == States.NOAUTH:
 
-            if not uid:
+            if self._card_removed(card_present):
 
                 self._set_state(
                     States.IDLE
@@ -489,7 +524,7 @@ class DeviceFSM:
 
         elif self.state == States.PROXY:
 
-            if not uid:
+            if self._card_removed(card_present):
 
                 self._set_state(
                     States.GRACE
@@ -507,7 +542,7 @@ class DeviceFSM:
 
         elif self.state == States.TRAINING:
 
-            if not uid:
+            if self._card_removed(card_present):
 
                 self._set_state(
                     States.IDLE
@@ -519,7 +554,7 @@ class DeviceFSM:
 
         elif self.state == States.TIMEOUT:
 
-            if not uid:
+            if self._card_removed(card_present):
 
                 self._set_state(
                     States.IDLE

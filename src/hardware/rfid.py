@@ -91,6 +91,31 @@ class RFIDReader:
 
         return None
 
+    def card_present(self):
+        """
+        Check if any RFID card is currently present.
+
+        This method does not apply UID debounce logic and should be used
+        for "wait until card removed" flows.
+
+        Returns:
+            bool: True if a card is detected, else False
+        """
+        try:
+            # Presence check should be lightweight and independent from UID
+            # read/debounce logic. A simple request is enough to know whether
+            # a card is in the RF field.
+            (status, atqa) = self.reader.request(self.reader.PICC_REQ_IDL)
+            if status == self.reader.OK:
+                return True
+
+            # Fallback for cards not in IDLE.
+            (status, atqa) = self.reader.request(self.reader.PICC_REQ_ALL)
+            return status == self.reader.OK
+
+        except Exception:
+            return False
+
     def read_block(self, block_addr, key=None):
         """
         Read a block from card.

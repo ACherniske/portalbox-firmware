@@ -17,32 +17,47 @@ def _safe_mode_requested():
     """
 
     try:
-        # Build list of pins to check: the BOOT pin plus a configurable box button
-        pin_nums = [SAFE_MODE_PIN]
+        # BOOT button is active-low.
+        boot_pin = machine.Pin(
+            SAFE_MODE_PIN,
+            machine.Pin.IN,
+            machine.Pin.PULL_UP
+        )
+
+        # Box button is inverted (active-high for safe boot).
+        box_pin = None
 
         try:
             from config.pins import BUTTON_PIN
-            if BUTTON_PIN not in pin_nums:
-                pin_nums.append(BUTTON_PIN)
+            if BUTTON_PIN != SAFE_MODE_PIN:
+                box_pin = machine.Pin(
+                    BUTTON_PIN,
+                    machine.Pin.IN,
+                    machine.Pin.PULL_UP
+                )
         except Exception:
-            # If config/pins isn't available, fall back to just the SAFE_MODE_PIN
+            # If config/pins isn't available, fall back to BOOT pin only.
             pass
 
-        pins = [
-            machine.Pin(n, machine.Pin.IN, machine.Pin.PULL_UP)
-            for n in pin_nums
-        ]
+        def button_pressed():
+            if boot_pin.value() == 0:
+                return True
+
+            if box_pin is not None and box_pin.value() == 1:
+                return True
+
+            return False
 
         # Require at least one button to be held (active low) continuously
         # for the full hold duration.
-        if not any(p.value() == 0 for p in pins):
+        if not button_pressed():
             return False
 
         start = time.ticks_ms()
 
         while time.ticks_diff(time.ticks_ms(), start) < SAFE_MODE_HOLD_MS:
             # If none of the buttons remain pressed, abort
-            if not any(p.value() == 0 for p in pins):
+            if not button_pressed():
                 return False
 
             time.sleep_ms(50)

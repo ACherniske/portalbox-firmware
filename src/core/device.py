@@ -473,6 +473,13 @@ class Device:
 
         return None
 
+    def card_present(self):
+        """Check if an RFID card is currently present."""
+        if self.rfid:
+            return self.rfid.card_present()
+
+        return False
+
     def stop_crypto(self):
         """Stop RFID crypto session."""
         if self.rfid:
