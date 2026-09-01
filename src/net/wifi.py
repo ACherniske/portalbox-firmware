@@ -360,13 +360,13 @@ class WifiManager:
         return self._wait_for_connection()
 
     def connect_with_retry(self, password, private_key_password=None):
-        if not self._init_interface():
-            return False
-
         for attempt in range(self.config.retry_attempts):
             self._log(f"[WiFi] Attempt {attempt + 1}/{self.config.retry_attempts}")
+            
+            if not self._init_interface():
+                self.last_error = "Interface reset failed"
 
-            if self.connect(password, private_key_password, skip_init=True):
+            elif self.connect(password, private_key_password, skip_init=True):
                 return True
 
             if attempt < self.config.retry_attempts - 1:
