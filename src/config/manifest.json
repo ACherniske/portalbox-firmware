@@ -9,6 +9,7 @@
 
   "src/core/api.py",
   "src/core/device.py",
+  "src/core/feedback.py",
   "src/core/fsm.py",
   "src/core/main.py",
 

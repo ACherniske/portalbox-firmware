@@ -42,14 +42,10 @@ class Application:
         print("[APP] Initializing application...")
 
         gc.collect()
-
-        # Initialize device hardware
+        
         self.device = get_device()
 
         self.device.print_status()
-
-        # Run startup sequence
-        self.device.startup_sequence()
 
         # Initialize FSM
         self.fsm = DeviceFSM()

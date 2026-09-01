@@ -7,6 +7,7 @@ import uasyncio as asyncio
 from micropython import const
 
 from core.device import get_device
+from core.feedback import apply_feedback
 from config import settings
 
 # Mock API layer
@@ -26,14 +27,25 @@ class States:
 
 
 STATE_NAMES = {
-    States.IDLE: 'IDLE',
-    States.AUTH: 'AUTH',
-    States.NOAUTH: 'NOAUTH',
-    States.GRACE: 'GRACE',
-    States.PROXY: 'PROXY',
-    States.TRAINING: 'TRAINING',
-    States.TIMEOUT: 'TIMEOUT'
+    States.IDLE: 'idle',
+    States.AUTH: 'auth',
+    States.NOAUTH: 'noauth',
+    States.GRACE: 'grace',
+    States.PROXY: 'proxy',
+    States.TRAINING: 'training',
+    States.TIMEOUT: 'timeout'
 }
+
+# States in which the relay should be energized (equipment powered).
+# This is an authorization decision the FSM owns directly — unlike
+# LED/buzzer feedback, it is not cosmetic and does not belong in
+# core/feedback.py's profile table.
+_RELAY_ON_STATES = (
+    States.AUTH,
+    States.GRACE,
+    States.PROXY,
+    States.TRAINING
+)
 
 
 class DeviceFSM:
@@ -87,24 +99,12 @@ class DeviceFSM:
         print(f"[FSM] State change: {old_name} -> {new_name}")
 
         # =========================================================
-        # EXIT EVENTS
+        # EXIT / CLEANUP EVENTS
         # =========================================================
 
-        if (
-            new_state == States.IDLE
-            and old_state in (
-                States.AUTH,
-                States.GRACE,
-                States.PROXY,
-                States.TRAINING,
-                States.TIMEOUT
-            )
-        ):
-
+        if new_state == States.IDLE:
             if self.current_uid:
-                api.log_session_end(
-                    self.current_uid
-                )
+                api.log_session_end(self.current_uid)
 
             self.current_uid = None
             self.trainer_uid = None
@@ -178,130 +178,25 @@ class DeviceFSM:
     # =========================================================================
 
     def _apply_state(self):
-        """Apply hardware behavior for current state."""
+        """
+        Apply hardware behavior for current state.
 
-        # Stop existing effects first
-        self.device.led_stop()
-        self.device.buzzer_stop()
+        Relay switching is an authorization decision the FSM makes
+        directly. LED/buzzer feedback is cosmetic and is delegated to
+        core/feedback.py, which is the single place that defines what
+        each state "looks and sounds like" (shared with core/system.py
+        for boot-phase narration).
+        """
 
-        # =========================================================
-        # IDLE
-        # =========================================================
-
-        if self.state == States.IDLE:
-
+        if self.state in _RELAY_ON_STATES:
+            self.device.relays_on()
+        else:
             self.device.relays_off()
 
-            self.device.led_pulse(
-                'BLUE',
-                min_brightness = 0.05,
-                max_brightness = 0.30,
-                step = 0.02
-            )
-
-        # =========================================================
-        # AUTH
-        # =========================================================
-
-        elif self.state == States.AUTH:
-
-            self.device.relays_on()
-
-            self.device.led_pulse(
-                'GREEN',
-                min_brightness = 0.05,
-                max_brightness = 0.40,
-                step = 0.02
-            )
-
-            self.device.buzzer_card_read()
-
-        # =========================================================
-        # NOAUTH
-        # =========================================================
-
-        elif self.state == States.NOAUTH:
-
-            self.device.relays_off()
-
-            self.device.led_pulse(
-                'RED',
-                min_brightness = 0.05,
-                max_brightness = 0.40,
-                step = 0.02
-            )
-
-            self.device.buzzer_timeout()
-
-        # =========================================================
-        # GRACE
-        # =========================================================
-
-        elif self.state == States.GRACE:
-
-            self.device.relays_on()
-
-            self.device.led_blink(
-                'YELLOW',
-                on_ms = 500,
-                off_ms = 500
-            )
-
-            self.device.buzzer_card_repeat(
-                interval_ms = 1000
-            )
-
-        # =========================================================
-        # PROXY
-        # =========================================================
-
-        elif self.state == States.PROXY:
-
-            self.device.relays_on()
-
-            self.device.led_pulse(
-                'ORANGE',
-                min_brightness = 0.05,
-                max_brightness = 0.40,
-                step = 0.02
-            )
-
-            self.device.buzzer_card_read()
-
-        # =========================================================
-        # TRAINING
-        # =========================================================
-
-        elif self.state == States.TRAINING:
-
-            self.device.relays_on()
-
-            self.device.led_pulse(
-                'PURPLE',
-                min_brightness = 0.05,
-                max_brightness = 0.40,
-                step = 0.02
-            )
-
-            self.device.buzzer_card_read()
-
-        # =========================================================
-        # TIMEOUT
-        # =========================================================
-
-        elif self.state == States.TIMEOUT:
-
-            self.device.relays_off()
-
-            self.device.led_blink(
-                'RED',
-                on_ms = 250,
-                off_ms = 250
-            )
-
-            self.device.buzzer_timeout_repeat(
-                interval_ms = 1000
-            )
+        apply_feedback(
+            self.device,
+            STATE_NAMES[self.state]
+        )
 
     # =========================================================================
     # Card Handling
@@ -524,12 +419,14 @@ class DeviceFSM:
                 # =================================================
 
                 elif self._is_auth(uid):
+                    if self.current_uid and uid != self.current_uid:
+                        api.log_session_end(self.current_uid)
+                        api.log_session_start(uid)
+                    elif not self.current_uid:
+                        api.log_session_start(uid)
 
                     self.current_uid = uid
-
-                    self._set_state(
-                        States.AUTH
-                    )
+                    self._set_state(States.AUTH)
 
                 # =================================================
                 # UNAUTHORIZED

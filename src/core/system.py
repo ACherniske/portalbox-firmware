@@ -2,6 +2,7 @@
 # System boot manager.
 #
 # Responsibilities:
+# - Hardware (HAL) initialization
 # - WiFi initialization
 # - OTA scheduling
 # - Launching the main application
@@ -9,9 +10,12 @@
 # Called by boot.py after safe-mode checks.
 
 import sys
+import time
 
 from net import WiFiConfig, WifiManager, ota
 from core.main import main
+from core.device import get_device
+from core.feedback import apply_feedback
 
 
 def _print_banner():
@@ -174,15 +178,21 @@ def _print_storage_info():
 
     try:
 
-        total, free, used = ota._get_storage_info()
+        # Uses the public ota.storage_info() wrapper rather than the
+        # private ota._get_storage_info(), so this module doesn't
+        # reach across ota.py's module boundary. Note: storage_info()
+        # also prints its own one-line summary before this function's
+        # boxed printout — a small cosmetic duplication, not a
+        # functional issue.
+        info = ota.storage_info()
 
         print('\n' + '=' * 60)
         print('STORAGE INFO')
         print('=' * 60)
 
-        print('Total: %s' % _fmt_size(total))
-        print('Used:  %s' % _fmt_size(used))
-        print('Free:  %s' % _fmt_size(free))
+        print('Total: %s' % _fmt_size(info['total']))
+        print('Used:  %s' % _fmt_size(info['used']))
+        print('Free:  %s' % _fmt_size(info['free']))
 
         print('=' * 60)
 
@@ -210,12 +220,54 @@ def _run_ota():
         print('[SYSTEM] OTA scheduler failed: %s' % error)
 
 
+def _offline_lockout(device):
+    """
+    Halt permanently with a visible red-blink warning.
+
+    The box has no operational value without connectivity, so rather
+    than continuing to main() when WiFi can't be established, this
+    parks here forever. A power-cycle (after connectivity is fixed)
+    is the only way out.
+
+    This is hand-rolled with direct, synchronous device.led_fill() /
+    device.led_clear() calls rather than device.led_blink(), because
+    led_blink() schedules an asyncio task that requires a running
+    event loop to actually execute — and no loop is running (or ever
+    will be, on this path) at this point in boot().
+
+    Args:
+        device: Device instance
+    """
+
+    print('\n' + '=' * 60)
+    print('OFFLINE — NO OPERATIONAL VALUE WITHOUT CONNECTIVITY')
+    print('Halting. Power-cycle after connectivity is restored.')
+    print('=' * 60)
+
+    while True:
+
+        device.led_fill('RED')
+        time.sleep_ms(400)
+
+        device.led_clear()
+        time.sleep_ms(1200)
+
+
 def boot():
     """
     Full system startup sequence.
     """
 
     _print_banner()
+
+    # =========================================================
+    # Hardware first — LED/buzzer feedback needs this before any
+    # WiFi/OTA work, which is the whole point of this ordering.
+    # =========================================================
+
+    device = get_device()
+
+    apply_feedback(device, 'booting')
 
     # =========================================================
     # Load WiFi configuration
@@ -225,11 +277,8 @@ def boot():
 
     if not _load_wifi_config(config):
 
-        print('[SYSTEM] Continuing without WiFi')
-
-        main()
-
-        return
+        _offline_lockout(device)
+        # unreachable — _offline_lockout() never returns
 
     # =========================================================
     # Decrypt password
@@ -239,35 +288,46 @@ def boot():
 
     if not password:
 
-        print('[SYSTEM] Continuing without WiFi')
-
-        main()
-
-        return
+        _offline_lockout(device)
+        # unreachable — _offline_lockout() never returns
 
     # =========================================================
     # Connect WiFi
     # =========================================================
 
+    apply_feedback(device, 'wifi_connecting')
+
     wifi = _connect_wifi(config, password)
 
-    if wifi:
-
-        _print_connection_status(wifi)
-
-        _print_storage_info()
-
-        _run_ota()
-
-    else:
+    if not wifi:
 
         print('[SYSTEM] WiFi unavailable')
-        print('[SYSTEM] Continuing offline')
+
+        _offline_lockout(device)
+        # unreachable — _offline_lockout() never returns
+
+    # =========================================================
+    # WiFi connected — proceed with OTA and launch
+    # =========================================================
+
+    _print_connection_status(wifi)
+
+    _print_storage_info()
+
+    apply_feedback(device, 'ota_checking')
+
+    _run_ota()
 
     # =========================================================
     # Launch main application
+    #
+    # device.startup_sequence() is the single owner of the "ready"
+    # cue (blue wipe + triple beep). core/main.py's
+    # Application.initialize() must NOT also call it.
     # =========================================================
 
     print('\n[SYSTEM] Launching main application...\n')
+
+    device.startup_sequence()
 
     main()
