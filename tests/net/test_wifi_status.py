@@ -44,7 +44,7 @@ def _manager(script, pre=1000, enterprise=False):
         config.set_eap_peap('net', 'user', 'pw', ca_cert_file=CA_FILE)
     else:
         config.set_wpa2_psk('net', 'password123')
-    config.timeout = 3
+    config.timeout = 6
     mgr = WifiManager(config=config, verbose=False)
     mgr.nic = FakeNIC(script)
     mgr._sync_time = lambda: None   # no real network for NTP
@@ -62,16 +62,16 @@ def run():
     runner = TestRunner()
 
     def test_no_ap_fails_fast():
-        mgr = _manager([1001, 201])
+        mgr = _manager([1001, 201])   # 201 repeats
         assert mgr._wait_for_connection() is False, "reported connected"
-        assert mgr.nic.polls <= 3, "took %d polls to fail" % mgr.nic.polls
+        assert mgr.nic.polls == 1 + wifi.FAIL_POLLS, "took %d polls to fail" % mgr.nic.polls
         assert mgr.last_error == "Access point not found", "last_error is %r" % mgr.last_error
         assert mgr.status == NetworkStatus.NO_AP_FOUND, "status is %s" % mgr.status
 
     def test_auth_fail_fails_fast():
-        mgr = _manager([1001, 202])
+        mgr = _manager([1001, 202])   # 202 repeats
         assert mgr._wait_for_connection() is False, "reported connected"
-        assert mgr.nic.polls <= 3, "took %d polls to fail" % mgr.nic.polls
+        assert mgr.nic.polls == 1 + wifi.FAIL_POLLS, "took %d polls to fail" % mgr.nic.polls
         assert mgr.status == NetworkStatus.WRONG_PASSWORD, "status is %s" % mgr.status
         assert mgr.last_error == wifi._FAILURE_MESSAGES[202], "last_error is %r" % mgr.last_error
 
@@ -83,6 +83,20 @@ def run():
     def test_repeat_code_after_connecting_fails():
         mgr = _manager([201, 1001, 201], pre=201)
         assert mgr._wait_for_connection() is False, "new failure ignored"
+        assert mgr.status == NetworkStatus.NO_AP_FOUND, "status is %s" % mgr.status
+
+    def test_brief_code_recovers():
+        # The driver keeps retrying; one poll of 202 is not a failure yet.
+        mgr = _manager([1001, 202, 1001, 1010])
+        assert mgr._wait_for_connection() is True, "brief 202 failed the attempt: %r" % mgr.last_error
+        _stop_autosave()
+
+    def test_stale_code_at_timeout_names_it():
+        # A leftover 201 that never clears is ignored as stale, but at the
+        # timeout it is still the best explanation, not "EAP".
+        mgr = _manager([201], pre=201, enterprise=True)
+        assert mgr._wait_for_connection() is False, "reported connected"
+        assert mgr.last_error == "Access point not found", "last_error is %r" % mgr.last_error
         assert mgr.status == NetworkStatus.NO_AP_FOUND, "status is %s" % mgr.status
 
     def test_enterprise_timeout_message():
@@ -117,6 +131,8 @@ def run():
     runner.run_test("Stale pre-connect code ignored", test_stale_code_ignored)
     runner.run_test("Same code after CONNECTING still fails", test_repeat_code_after_connecting_fails)
     runner.run_test("Enterprise timeout says EAP", test_enterprise_timeout_message)
+    runner.run_test("Brief failure code recovers", test_brief_code_recovers)
+    runner.run_test("Stale code at timeout is named", test_stale_code_at_timeout_names_it)
     runner.run_test("GOT_IP connects", test_got_ip)
     runner.run_test("connect() records the pre-connect code", test_connect_records_pre_status)
     runner.run_test("Every status code has a name", test_every_status_named)

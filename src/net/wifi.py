@@ -18,6 +18,10 @@ def _release():
     _held.clear()
 
 
+# A failure code fails the wait only after this many polls in a row: the
+# driver keeps retrying and can recover from a brief NO_AP_FOUND or auth fail.
+FAIL_POLLS = 3
+
 # wlan.status() codes that mean the attempt has failed, and what to tell the user.
 _FAILURE_MESSAGES = {
     NetworkStatus.BEACON_TIMEOUT: "Lost the access point (beacon timeout)",
@@ -330,6 +334,7 @@ class WifiManager:
         start_time = time.time()
         last_status = None
         seen_connecting = False
+        fail_count = 0
 
         while not self.nic.isconnected():
             elapsed = time.time() - start_time
@@ -338,6 +343,7 @@ class WifiManager:
             if status != last_status:
                 self._log(f"[WiFi] [{elapsed:.1f}s] Status: {self._get_status_name(status)}")
                 last_status = status
+                fail_count = 0
 
             if status == NetworkStatus.CONNECTING:
                 seen_connecting = True
@@ -346,19 +352,26 @@ class WifiManager:
             # radio has shown CONNECTING since; before that it may be stale.
             message = _FAILURE_MESSAGES.get(status)
             if message and (seen_connecting or status != self._pre_status):
-                self.last_error = message
-                self.status = status
-                self._log(f"[WiFi] FAILED: {self.last_error}")
-                return False
+                fail_count += 1
+                if fail_count >= FAIL_POLLS:
+                    self.last_error = message
+                    self.status = status
+                    self._log(f"[WiFi] FAILED: {self.last_error}")
+                    return False
 
             if elapsed > self.config.timeout:
-                if self.config.network_type == NetworkType.WPA2_ENTERPRISE:
+                if message:
+                    # Still the best explanation, even if it looked stale.
+                    self.last_error = message
+                    self.status = status
+                elif self.config.network_type == NetworkType.WPA2_ENTERPRISE:
                     self.last_error = (
                         f"Timed out during login (EAP) after {self.config.timeout}s: "
                         "check the board clock, CA certificate, and credentials")
                 else:
                     self.last_error = f"Timeout after {self.config.timeout}s"
-                self.status = NetworkStatus.CONNECT_FAIL
+                if not message:
+                    self.status = NetworkStatus.CONNECT_FAIL
                 self._log(f"[WiFi] FAILED: {self.last_error}")
                 return False
 
