@@ -24,7 +24,8 @@ _USER_AGENT = 'portalbox-ota'
 _CONFIG_PATH = '/config/ota_config.json'
 _OTA_STATE_PATH = '/config/ota_state.json'
 _OTA_INTERVAL_SECONDS = 24 * 60 * 60
-_MIN_VALID_EPOCH = 1700000000
+# 2023-11-14 on the board's own epoch (2000 on this port, not 1970).
+_MIN_VALID_EPOCH = time.mktime((2023, 11, 14, 0, 0, 0, 0, 0))
 _PROTECTED_PATHS = [
     # Protect device-local and runtime paths so OTA cannot wipe secrets
     _CONFIG_PATH,
