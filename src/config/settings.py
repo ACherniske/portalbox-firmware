@@ -21,4 +21,4 @@ RFID_DEBOUNCE_MS = const(250)  # Minimum time between reads of the same tag in m
 
 # Device Timeouts
 GRACE_TIMEOUT_MS = const(30000) # Time to wait when in grace period before going to idle (30s)
-DEVICE_TIMEOUT_MS = const(60000*1000) # Time to wait when idle before going to sleep (60m)
+DEVICE_TIMEOUT_MS = const(60 * 60 * 1000) # Time to wait when idle before going to sleep (60m)
