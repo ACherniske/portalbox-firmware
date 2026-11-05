@@ -17,6 +17,19 @@ def _remove_saved():
         pass
 
 
+# The suite saves and deletes times freely, so it must not touch the board's
+# real saved time: a stray future value there would set the next boot's floor.
+TEST_SAVED_FILE = '/config/test_last_time.txt'
+
+
+def _read(path):
+    try:
+        with open(path, 'r') as f:
+            return f.read()
+    except OSError:
+        return None
+
+
 def _floor_constant():
     return time.mktime(clock.CLOCK_FLOOR + (0, 0, 0, 0, 0))
 
@@ -30,6 +43,10 @@ def run():
         os.mkdir('/config')
     except OSError:
         pass
+
+    real_saved_file = clock.SAVED_TIME_FILE
+    real_saved = _read(real_saved_file)
+    clock.SAVED_TIME_FILE = TEST_SAVED_FILE
 
     def test_floor_moves_old_clock_forward():
         _remove_saved()
@@ -121,6 +138,14 @@ def run():
         clock._autosave_timer.deinit()
         clock._autosave_timer = None
     _remove_saved()
+    clock.SAVED_TIME_FILE = real_saved_file
+
+    def test_real_saved_time_untouched():
+        assert clock.SAVED_TIME_FILE == real_saved_file, "SAVED_TIME_FILE not restored"
+        after = _read(real_saved_file)
+        assert after == real_saved, "real saved time changed: %r -> %r" % (real_saved, after)
+
+    runner.run_test("Board's real saved time untouched", test_real_saved_time_untouched)
     tm = time.gmtime(saved_rtc + time.ticks_diff(time.ticks_ms(), t0) // 1000)
     machine.RTC().datetime((tm[0], tm[1], tm[2], tm[6], tm[3], tm[4], tm[5], 0))
 
