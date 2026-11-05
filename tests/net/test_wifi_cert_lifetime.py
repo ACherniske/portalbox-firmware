@@ -112,6 +112,15 @@ def run():
         assert nic.held_at_disconnect is not None, "nic.disconnect() not called on error"
         assert nic.held_at_disconnect > 0, "cert freed before nic.disconnect()"
 
+    def test_tls_key_password_held():
+        nic = FakeNIC()
+        config = WiFiConfig()
+        config.set_eap_tls('net', CERT_FILE, KEY_FILE, private_key_password='keypw')
+        mgr = WifiManager(config=config, verbose=False)
+        mgr.nic = nic
+        assert mgr._connect_eap_tls(''.join(['key', 'pw'])) is True, "fake connect failed"
+        assert nic.ids['private_key_password'] in _held_ids(), "private_key_password not held"
+
     def test_tls_key_material_held():
         nic = FakeNIC()
         config = WiFiConfig()
@@ -130,6 +139,7 @@ def run():
     runner.run_test("TLS client cert and key held", test_tls_key_material_held)
     runner.run_test("disconnect() stops the driver before freeing", test_disconnect_stops_driver_first)
     runner.run_test("Connect error stops the driver before freeing", test_connect_error_stops_driver_first)
+    runner.run_test("TLS key password held", test_tls_key_password_held)
 
     if hasattr(wifi, '_release'):
         wifi._release()

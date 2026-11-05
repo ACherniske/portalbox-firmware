@@ -281,7 +281,7 @@ class WifiManager:
             if self.config.bssid:
                 connect_params['bssid'] = self.config.bssid
 
-            _hold(client_cert, private_key)
+            _hold(client_cert, private_key, private_key_password)
             self.nic.connect(self.config.ssid, **connect_params)
             self._log("[WiFi] Connection initiated")
             self.status = NetworkStatus.CONNECTING
