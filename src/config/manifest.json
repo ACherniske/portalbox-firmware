@@ -5,6 +5,7 @@
   "src/net/crypto.py",
   "src/net/models.py",
   "src/net/wifi.py",
+  "src/net/clock.py",
   "src/net/ota.py",
 
   "src/core/api.py",

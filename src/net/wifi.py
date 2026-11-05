@@ -2,6 +2,7 @@ import network
 import time
 
 from .models import WiFiConfig, NetworkType, NetworkStatus, EAPMethod
+from . import clock
 
 
 class WifiManager:
@@ -54,6 +55,7 @@ class WifiManager:
 
             ntptime.settime()
             self._log("[WiFi] Time synchronized with NTP")
+            clock.save_now()
         except Exception as e:
             self._log(f"[WiFi] NTP sync failed: {e}")
 
@@ -326,6 +328,7 @@ class WifiManager:
         except Exception:
             # _sync_time logs its own errors; don't let NTP failures break connection
             pass
+        clock.start_autosave()
         return True
 
     def connect(self, password, private_key_password=None, skip_init=False):
@@ -345,6 +348,11 @@ class WifiManager:
         if not skip_init:
             if not self._init_interface():
                 return False
+
+        # TLS checks certificate dates against the RTC, which reads 2000-01-01
+        # after power-on. Move it up to the floor before any login attempt.
+        if clock.apply_floor():
+            self._log(f"[WiFi] Clock was behind; set to floor {time.localtime()[:3]}")
 
         if self.config.network_type == NetworkType.WPA2_ENTERPRISE:
             if not self._connect_wpa2_enterprise(password, private_key_password):
