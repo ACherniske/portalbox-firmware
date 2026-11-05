@@ -18,6 +18,33 @@ def _release():
     _held.clear()
 
 
+# wlan.status() codes that mean the attempt has failed, and what to tell the user.
+_FAILURE_MESSAGES = {
+    NetworkStatus.BEACON_TIMEOUT: "Lost the access point (beacon timeout)",
+    NetworkStatus.NO_AP_FOUND: "Access point not found",
+    NetworkStatus.WRONG_PASSWORD: "Authentication failed (wrong password or rejected login)",
+    NetworkStatus.ASSOC_FAIL: "Association with the access point failed",
+    NetworkStatus.HANDSHAKE_TIMEOUT: "Handshake timed out (often a wrong password)",
+    NetworkStatus.NO_AP_FOUND_W_COMPATIBLE_SECURITY: "No access point with compatible security found",
+    NetworkStatus.NO_AP_FOUND_IN_AUTHMODE_THRESHOLD: "No access point within the auth mode threshold found",
+    NetworkStatus.NO_AP_FOUND_IN_RSSI_THRESHOLD: "No access point with a strong enough signal found",
+}
+
+_STATUS_NAMES = {
+    NetworkStatus.IDLE: 'IDLE',
+    NetworkStatus.CONNECTING: 'CONNECTING',
+    NetworkStatus.GOT_IP: 'GOT_IP',
+    NetworkStatus.BEACON_TIMEOUT: 'BEACON_TIMEOUT',
+    NetworkStatus.NO_AP_FOUND: 'NO_AP_FOUND',
+    NetworkStatus.WRONG_PASSWORD: 'WRONG_PASSWORD',
+    NetworkStatus.CONNECT_FAIL: 'CONNECT_FAIL',   # same code as ASSOC_FAIL
+    NetworkStatus.HANDSHAKE_TIMEOUT: 'HANDSHAKE_TIMEOUT',
+    NetworkStatus.NO_AP_FOUND_W_COMPATIBLE_SECURITY: 'NO_AP_FOUND_W_COMPATIBLE_SECURITY',
+    NetworkStatus.NO_AP_FOUND_IN_AUTHMODE_THRESHOLD: 'NO_AP_FOUND_IN_AUTHMODE_THRESHOLD',
+    NetworkStatus.NO_AP_FOUND_IN_RSSI_THRESHOLD: 'NO_AP_FOUND_IN_RSSI_THRESHOLD',
+}
+
+
 class WifiManager:
     """
     WiFi connection manager.
@@ -34,6 +61,10 @@ class WifiManager:
         self.connected = False
         self.connection_time = None
         self.status = NetworkStatus.IDLE
+        # wlan.status() just before nic.connect(). The radio keeps the last
+        # disconnect reason until a new one arrives, so a code equal to this
+        # may be left over from the previous attempt.
+        self._pre_status = None
 
         print("[WiFi] Manager initialized")
 
@@ -298,6 +329,7 @@ class WifiManager:
 
         start_time = time.time()
         last_status = None
+        seen_connecting = False
 
         while not self.nic.isconnected():
             elapsed = time.time() - start_time
@@ -307,26 +339,25 @@ class WifiManager:
                 self._log(f"[WiFi] [{elapsed:.1f}s] Status: {self._get_status_name(status)}")
                 last_status = status
 
-            if status == NetworkStatus.WRONG_PASSWORD:
-                self.last_error = "Wrong password"
-                self.status = NetworkStatus.WRONG_PASSWORD
-                self._log(f"[WiFi] FAILED: {self.last_error}")
-                return False
+            if status == NetworkStatus.CONNECTING:
+                seen_connecting = True
 
-            if status == NetworkStatus.NO_AP_FOUND:
-                self.last_error = "Access point not found"
-                self.status = NetworkStatus.NO_AP_FOUND
-                self._log(f"[WiFi] FAILED: {self.last_error}")
-                return False
-
-            if status == NetworkStatus.CONNECT_FAIL:
-                self.last_error = "Connection failed"
-                self.status = NetworkStatus.CONNECT_FAIL
+            # A failure code equal to the pre-connect one counts only once the
+            # radio has shown CONNECTING since; before that it may be stale.
+            message = _FAILURE_MESSAGES.get(status)
+            if message and (seen_connecting or status != self._pre_status):
+                self.last_error = message
+                self.status = status
                 self._log(f"[WiFi] FAILED: {self.last_error}")
                 return False
 
             if elapsed > self.config.timeout:
-                self.last_error = f"Timeout after {self.config.timeout}s"
+                if self.config.network_type == NetworkType.WPA2_ENTERPRISE:
+                    self.last_error = (
+                        f"Timed out during login (EAP) after {self.config.timeout}s: "
+                        "check the board clock, CA certificate, and credentials")
+                else:
+                    self.last_error = f"Timeout after {self.config.timeout}s"
                 self.status = NetworkStatus.CONNECT_FAIL
                 self._log(f"[WiFi] FAILED: {self.last_error}")
                 return False
@@ -372,6 +403,8 @@ class WifiManager:
         # after power-on. Move it up to the floor before any login attempt.
         if clock.apply_floor():
             self._log(f"[WiFi] Clock was behind; set to floor {time.localtime()[:3]}")
+
+        self._pre_status = self.nic.status()
 
         if self.config.network_type == NetworkType.WPA2_ENTERPRISE:
             if not self._connect_wpa2_enterprise(password, private_key_password):
@@ -457,17 +490,7 @@ class WifiManager:
         return status
 
     def _get_status_name(self, status_code):
-        status_names = {
-            NetworkStatus.IDLE: 'IDLE',
-            NetworkStatus.CONNECTING: 'CONNECTING',
-            1000: 'CONNECTING',
-            1001: 'CONNECTING',
-            NetworkStatus.WRONG_PASSWORD: 'WRONG_PASSWORD',
-            NetworkStatus.NO_AP_FOUND: 'NO_AP_FOUND',
-            NetworkStatus.CONNECT_FAIL: 'CONNECT_FAIL',
-            NetworkStatus.GOT_IP: 'GOT_IP',
-        }
-        return status_names.get(status_code, f'UNKNOWN({status_code})')
+        return _STATUS_NAMES.get(status_code, f'UNKNOWN({status_code})')
 
     def scan(self):
         if not self.nic:

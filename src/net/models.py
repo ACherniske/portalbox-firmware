@@ -1,4 +1,5 @@
 # net/models.py
+import network
 import ujson as json
 from micropython import const
 from . import crypto
@@ -29,13 +30,24 @@ class TTLSPhase2:
 
 
 class NetworkStatus:
-    """Standard network connection states."""
-    IDLE = const(0)
-    CONNECTING = const(1)
-    WRONG_PASSWORD = const(-3)
-    NO_AP_FOUND = const(-2)
-    CONNECT_FAIL = const(-1)
-    GOT_IP = const(3)
+    """Connection states, using the codes the ESP32's wlan.status() returns.
+    The numbers are fallbacks for a build that lacks a STAT_* constant."""
+    IDLE = getattr(network, 'STAT_IDLE', 1000)
+    CONNECTING = getattr(network, 'STAT_CONNECTING', 1001)
+    GOT_IP = getattr(network, 'STAT_GOT_IP', 1010)
+    BEACON_TIMEOUT = getattr(network, 'STAT_BEACON_TIMEOUT', 200)
+    NO_AP_FOUND = getattr(network, 'STAT_NO_AP_FOUND', 201)
+    WRONG_PASSWORD = getattr(network, 'STAT_WRONG_PASSWORD', 202)
+    ASSOC_FAIL = getattr(network, 'STAT_ASSOC_FAIL', 203)
+    HANDSHAKE_TIMEOUT = getattr(network, 'STAT_HANDSHAKE_TIMEOUT', 204)
+    NO_AP_FOUND_W_COMPATIBLE_SECURITY = getattr(
+        network, 'STAT_NO_AP_FOUND_W_COMPATIBLE_SECURITY', 210)
+    NO_AP_FOUND_IN_AUTHMODE_THRESHOLD = getattr(
+        network, 'STAT_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD', 211)
+    NO_AP_FOUND_IN_RSSI_THRESHOLD = getattr(
+        network, 'STAT_NO_AP_FOUND_IN_RSSI_THRESHOLD', 212)
+    # The manager's own "attempt failed" state (timeout, connect() raised).
+    CONNECT_FAIL = ASSOC_FAIL
 
 
 class WiFiConfig:
