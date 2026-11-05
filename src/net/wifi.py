@@ -4,6 +4,19 @@ import time
 from .models import WiFiConfig, NetworkType, NetworkStatus, EAPMethod
 from . import clock
 
+# nic.connect() hands ESP-IDF a pointer into each cert/key str without a copy.
+# ESP-IDF reads it again on every EAP handshake (including auto-reconnects),
+# so the strings must stay alive at module level, not in a local.
+_held = []
+
+
+def _hold(*values):
+    _held[:] = values
+
+
+def _release():
+    _held.clear()
+
 
 class WifiManager:
     """
@@ -142,11 +155,13 @@ class WifiManager:
             if self.config.bssid:
                 connect_params['bssid'] = self.config.bssid
 
+            _hold(cert_content)
             self.nic.connect(self.config.ssid, **connect_params)
             self._log("[WiFi] Connection initiated")
             self.status = NetworkStatus.CONNECTING
             return True
         except Exception as e:
+            _release()
             self._log(f"[WiFi] Connection error: {e}")
             self.last_error = str(e)
             self.status = NetworkStatus.CONNECT_FAIL
@@ -180,11 +195,13 @@ class WifiManager:
             if self.config.bssid:
                 connect_params['bssid'] = self.config.bssid
 
+            _hold(cert_content)
             self.nic.connect(self.config.ssid, **connect_params)
             self._log("[WiFi] Connection initiated")
             self.status = NetworkStatus.CONNECTING
             return True
         except Exception as e:
+            _release()
             self._log(f"[WiFi] Connection error: {e}")
             self.last_error = str(e)
             self.status = NetworkStatus.CONNECT_FAIL
@@ -233,11 +250,13 @@ class WifiManager:
             if self.config.bssid:
                 connect_params['bssid'] = self.config.bssid
 
+            _hold(client_cert, private_key)
             self.nic.connect(self.config.ssid, **connect_params)
             self._log("[WiFi] Connection initiated")
             self.status = NetworkStatus.CONNECTING
             return True
         except Exception as e:
+            _release()
             self._log(f"[WiFi] Connection error: {e}")
             self.last_error = str(e)
             self.status = NetworkStatus.CONNECT_FAIL
@@ -385,6 +404,7 @@ class WifiManager:
         return False
 
     def disconnect(self):
+        _release()
         if self.nic and self.nic.isconnected():
             self._log("[WiFi] Disconnecting...")
             self.nic.disconnect()
