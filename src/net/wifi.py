@@ -192,7 +192,7 @@ class WifiManager:
             self.status = NetworkStatus.CONNECTING
             return True
         except Exception as e:
-            _release()
+            self._stop_and_release()
             self._log(f"[WiFi] Connection error: {e}")
             self.last_error = str(e)
             self.status = NetworkStatus.CONNECT_FAIL
@@ -232,7 +232,7 @@ class WifiManager:
             self.status = NetworkStatus.CONNECTING
             return True
         except Exception as e:
-            _release()
+            self._stop_and_release()
             self._log(f"[WiFi] Connection error: {e}")
             self.last_error = str(e)
             self.status = NetworkStatus.CONNECT_FAIL
@@ -287,7 +287,7 @@ class WifiManager:
             self.status = NetworkStatus.CONNECTING
             return True
         except Exception as e:
-            _release()
+            self._stop_and_release()
             self._log(f"[WiFi] Connection error: {e}")
             self.last_error = str(e)
             self.status = NetworkStatus.CONNECT_FAIL
@@ -436,11 +436,22 @@ class WifiManager:
         self._log("[WiFi] All retry attempts failed")
         return False
 
-    def disconnect(self):
+    def _stop_and_release(self):
+        # The driver may still be retrying a login and reading the held certs,
+        # so stop it before freeing them, connected or not.
+        if self.nic:
+            try:
+                self.nic.disconnect()
+            except Exception:
+                pass   # raises when the driver is already stopped
         _release()
-        if self.nic and self.nic.isconnected():
+
+    def disconnect(self):
+        was_connected = self.nic is not None and self.nic.isconnected()
+        if was_connected:
             self._log("[WiFi] Disconnecting...")
-            self.nic.disconnect()
+        self._stop_and_release()
+        if was_connected:
             self.connected = False
             self.connection_time = None
             self.status = NetworkStatus.IDLE

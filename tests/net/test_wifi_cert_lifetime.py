@@ -19,6 +19,7 @@ class FakeNIC:
     def __init__(self, raise_on_connect=False):
         self.raise_on_connect = raise_on_connect
         self.ids = {}
+        self.held_at_disconnect = None   # len(wifi._held) when disconnect() ran
 
     def connect(self, ssid, **kw):
         self.ids = {k: id(v) for k, v in kw.items() if isinstance(v, str)}
@@ -29,7 +30,7 @@ class FakeNIC:
         return False
 
     def disconnect(self):
-        pass
+        self.held_at_disconnect = len(wifi._held)
 
 
 def _write(path, text):
@@ -93,6 +94,24 @@ def run():
         assert mgr.status == NetworkStatus.CONNECT_FAIL, "status is %s" % mgr.status
         assert wifi._held == [], "connect error left %d value(s) held" % len(wifi._held)
 
+    def test_disconnect_stops_driver_first():
+        # Not connected, but the driver may still be retrying the login and
+        # reading the cert: stop it before the cert is freed.
+        nic = FakeNIC()
+        mgr = _peap_manager(nic)
+        mgr._connect_eap_peap('pw')
+        mgr.disconnect()
+        assert nic.held_at_disconnect is not None, "nic.disconnect() not called"
+        assert nic.held_at_disconnect > 0, "cert freed before nic.disconnect()"
+        assert wifi._held == [], "disconnect() left %d value(s) held" % len(wifi._held)
+
+    def test_connect_error_stops_driver_first():
+        nic = FakeNIC(raise_on_connect=True)
+        mgr = _peap_manager(nic)
+        mgr._connect_eap_peap('pw')
+        assert nic.held_at_disconnect is not None, "nic.disconnect() not called on error"
+        assert nic.held_at_disconnect > 0, "cert freed before nic.disconnect()"
+
     def test_tls_key_material_held():
         nic = FakeNIC()
         config = WiFiConfig()
@@ -109,6 +128,8 @@ def run():
     runner.run_test("disconnect() releases held certs", test_disconnect_releases)
     runner.run_test("Connect error releases held certs", test_connect_error_releases)
     runner.run_test("TLS client cert and key held", test_tls_key_material_held)
+    runner.run_test("disconnect() stops the driver before freeing", test_disconnect_stops_driver_first)
+    runner.run_test("Connect error stops the driver before freeing", test_connect_error_stops_driver_first)
 
     if hasattr(wifi, '_release'):
         wifi._release()
