@@ -1,5 +1,6 @@
 [
   "src/boot.py",
+  "src/recovery.py",
 
   "src/net/__init__.py",
   "src/net/crypto.py",
