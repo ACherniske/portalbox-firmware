@@ -204,7 +204,11 @@ def _print_storage_info():
 
 
 def _run_ota():
-    """Run OTA update scheduler."""
+    """Run OTA update scheduler, only if the OTA config turns it on."""
+
+    if ota.load_config().get('enabled') is not True:
+        print('[SYSTEM] OTA off')
+        return
 
     try:
 
