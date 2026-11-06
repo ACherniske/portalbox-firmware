@@ -240,6 +240,26 @@ def _load_config():
         return {}
 
 
+def load_config(path=_CONFIG_PATH):
+    """Return the OTA config with defaults. OTA is off unless `enabled` is true."""
+    try:
+        with open(path, 'r') as file_handle:
+            stored = json.loads(file_handle.read())
+        if not isinstance(stored, dict):
+            stored = {}
+    except Exception:
+        stored = {}
+    return {
+        'user': stored.get('user', ''),
+        'repository': stored.get('repository', ''),
+        'branch': stored.get('branch', 'main'),
+        'token': stored.get('token', ''),
+        'ignore': stored.get('ignore', []),
+        'enabled': stored.get('enabled') is True,
+        'mode': stored.get('mode', 'release'),
+    }
+
+
 def _resolve_config(user=None, repository=None, branch=None, token=None, ignore=None):
     """Merge explicit arguments with stored OTA config values."""
     config = _load_config()
@@ -325,8 +345,13 @@ def run_daily_update_if_due(user=None, repository=None, branch=None, token=None,
         return None
 
 
-def create_config(user='', repository='', branch='main', token='', ignore=None):
-    """Write the OTA config file to `/config/ota_config.json`."""
+def create_config(user='', repository='', branch='main', token='', ignore=None,
+                  enabled=False, mode='release'):
+    """Write the OTA config file to `/config/ota_config.json`.
+
+    mode 'release' follows the latest GitHub release; 'branch' follows
+    the tip of `branch`. OTA stays off until `enabled` is True.
+    """
     if ignore is None:
         ignore = []
 
@@ -337,6 +362,8 @@ def create_config(user='', repository='', branch='main', token='', ignore=None):
         'branch': branch,
         'token': token,
         'ignore': ignore,
+        'enabled': enabled,
+        'mode': mode,
     }
 
     with open(_CONFIG_PATH, 'w') as file_handle:

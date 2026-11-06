@@ -3,10 +3,7 @@
   "repository": "portalbox-firmware",
   "branch": "main",
   "token": "",
-  "ignore": [
-    "/src/config/wifi_config.json",
-    "/src/config/ota_config.json",
-    "/src/config/manifest.json",
-    "ca-cert.pem"
-  ]
+  "enabled": false,
+  "mode": "release",
+  "ignore": []
 }

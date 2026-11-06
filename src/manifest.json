@@ -1,6 +1,8 @@
 [
   "src/boot.py",
+  "src/main.py",
   "src/recovery.py",
+  "src/manifest.json",
 
   "src/net/__init__.py",
   "src/net/crypto.py",
@@ -8,6 +10,7 @@
   "src/net/wifi.py",
   "src/net/clock.py",
   "src/net/ota.py",
+  "src/net/ota_target.py",
   "src/net/https.py",
   "src/certs/github_roots.pem",
 
