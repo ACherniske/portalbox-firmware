@@ -1,10 +1,13 @@
 # main.py
-# App entry point: safe-mode check, then the PortalBox app.
+# App entry point: safe-mode check, recovery anchor, watchdog, then the app.
 #
 # MicroPython runs main.py only on a normal boot (power-up, reset, Ctrl-D at
 # the REPL), not on mpremote's soft reset, so tools get a clean REPL.
 # boot.py has already turned the relays off.
 
+import gc
+import io
+import sys
 import time
 import machine
 
@@ -96,6 +99,49 @@ def _safe_mode():
         time.sleep(1)
 
 
+def _cause_name(cause):
+    """machine.reset_cause() as a name, e.g. WDT_RESET."""
+    for name in ('PWRON_RESET', 'HARD_RESET', 'WDT_RESET',
+                 'DEEPSLEEP_RESET', 'SOFT_RESET'):
+        if getattr(machine, name, None) == cause:
+            return name
+    return str(cause)
+
+
+def _log_crash(recovery, error):
+    """Print the traceback and log it as one line. Never raises: the box
+    must still reset after a crash that left no memory to describe it."""
+    try:
+        gc.collect()
+        buf = io.StringIO()
+        sys.print_exception(error, buf)
+        trace = buf.getvalue()
+        print("\n[BOOT] crash %s: %s" % (type(error).__name__, error))
+        print(trace)
+        recovery.log('crash', '%s: %s | %s' % (
+            type(error).__name__, error, trace.strip().replace('\n', ' | ')))
+    except Exception:
+        pass
+
+
+def _run_app(recovery):
+    """Run the app; log how it ended. Never raises."""
+    try:
+        print("[BOOT] Launching system manager...")
+
+        from core.system import boot
+
+        boot()
+        recovery.log('boot', 'app returned')
+
+    except Exception as error:
+        _log_crash(recovery, error)
+
+    except BaseException as error:
+        # Ctrl-C (a tool connecting) or SystemExit: not a crash, but the end.
+        recovery.log('boot', 'interrupted: %s' % type(error).__name__)
+
+
 def launch():
     """App entry point."""
 
@@ -109,23 +155,39 @@ def launch():
         _safe_mode()
         return
 
+    import recovery
+
+    cause = machine.reset_cause()
+    recovery.log('boot', 'start, reset cause %s' % _cause_name(cause))
+    # The fork also reports a brownout as PWRON_RESET, so a box that browns
+    # out in a loop clears its count each time and is never stuck (known gap).
+    power_on = cause == machine.PWRON_RESET
     try:
-        print("[BOOT] Launching system manager...")
-
-        from core.system import boot
-
-        boot()
-
+        action, reason = recovery.on_boot(power_on)
     except Exception as error:
-        print("\n" + "=" * 60)
-        print("BOOT FAILURE")
-        print("=" * 60)
-        print(error)
-        print("=" * 60)
+        # Saving the boot count failed (flash full or broken): don't run blind.
+        recovery.log('boot', 'on_boot failed: %r' % (error,))
+        action, reason = 'stuck', 'boot check failed'
 
-        # Keep REPL alive after crash
-        while True:
-            time.sleep(1)
+    if action == 'stuck':
+        recovery.stuck_forever(reason)
+        return
+
+    dev = recovery.dev_mode()
+    if dev:
+        print("[BOOT] DEV MODE: watchdog and OTA off")
+        recovery.log('boot', 'DEV MODE: watchdog and OTA off')
+    else:
+        recovery.arm_watchdog()
+
+    try:
+        _run_app(recovery)
+    finally:
+        # Whatever happened, a box out of dev mode starts over.
+        if not dev:
+            machine.reset()
+
+    print("[BOOT] Dev mode: staying at the REPL")
 
 
 launch()

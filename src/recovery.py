@@ -426,3 +426,67 @@ def arm_watchdog(timeout_ms=WDT_MS):
 def feed():
     if _wdt is not None:
         _wdt.feed()
+
+
+def relays_low():
+    """Drive both relay pins low (relays off). Never raises.
+
+    Uses config.pins when it has the relay names, else pins 18 and 9.
+    """
+    try:
+        from config.pins import RELAY_AC_PIN, RELAY_USB_PIN
+        pins = (RELAY_AC_PIN, RELAY_USB_PIN)
+    except Exception:
+        pins = (18, 9)
+    for pin in pins:
+        try:
+            machine.Pin(pin, machine.Pin.OUT, value=0)
+        except Exception as e:
+            print('[BOOT] relay pin %s not driven low: %s' % (pin, e))
+
+
+def _leds_red():
+    """All LEDs red. Skipped (and logged) if the LED code can't load."""
+    try:
+        from config.pins import (SPI_LED_ID, SPI_LED_SCK, SPI_LED_MOSI,
+                                 SPI_LED_MISO, SPI_LED_BAUDRATE)
+        from config.settings import LED_COUNT
+        from hardware.lib.dotstar import DotStar
+        spi = machine.SPI(SPI_LED_ID, baudrate=SPI_LED_BAUDRATE,
+                          polarity=0, phase=0,
+                          sck=machine.Pin(SPI_LED_SCK),
+                          mosi=machine.Pin(SPI_LED_MOSI),
+                          miso=machine.Pin(SPI_LED_MISO))
+        leds = DotStar(spi, num_leds=LED_COUNT)
+        leds.fill(255, 0, 0)
+        leds.show()
+    except Exception as e:
+        log('stuck', 'no LEDs: %r' % (e,))
+
+
+def stuck_forever(reason, beep_ms=100, period_ms=5000, cycles=None):
+    """The 'needs a cable' signal: relays off, all LEDs red, a short beep
+    every period_ms. cycles=None loops forever; tests pass a count.
+    """
+    relays_low()
+    log('stuck', reason)
+    print('[BOOT] STUCK (%s): needs a cable' % reason)
+    _leds_red()
+    try:
+        from config.pins import BUZZER_PIN
+    except Exception:
+        BUZZER_PIN = 4
+    try:
+        buzzer = machine.Pin(BUZZER_PIN, machine.Pin.OUT, value=0)
+    except Exception:
+        buzzer = None
+    n = 0
+    while cycles is None or n < cycles:
+        if buzzer is not None:
+            buzzer.on()
+        time.sleep_ms(beep_ms)
+        if buzzer is not None:
+            buzzer.off()
+        feed()
+        time.sleep_ms(period_ms - beep_ms)
+        n += 1

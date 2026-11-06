@@ -4,23 +4,12 @@
 # MicroPython runs main.py only on a normal boot, so tools like mpremote
 # get a clean REPL with the app stopped.
 
-import machine
+import sys
+import recovery
 
+recovery.relays_low()
 
-def _relays_low():
-    """Drive both relay pins low (relays off) as early as possible."""
-
-    try:
-        from config.pins import RELAY_AC_PIN, RELAY_USB_PIN
-        pins = (RELAY_AC_PIN, RELAY_USB_PIN)
-    except Exception:
-        pins = (18, 9)
-
-    for pin in pins:
-        try:
-            machine.Pin(pin, machine.Pin.OUT, value=0)
-        except Exception as error:
-            print("[BOOT] Could not drive relay pin %s low: %s" % (pin, error))
-
-
-_relays_low()
+# Forget the module so a tool that copies a new recovery.py and then
+# imports it in the same session gets the new file, not this one.
+del sys.modules['recovery']
+del recovery
