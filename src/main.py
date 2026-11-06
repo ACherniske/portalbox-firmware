@@ -31,7 +31,8 @@ def _safe_mode_requested():
             machine.Pin.PULL_UP
         )
 
-        # Box button is inverted (active-high for safe boot).
+        # Box button is inverted (active-high for safe boot). Its pin comes
+        # from config/pins.py, a per-box file that OTA never changes.
         box_pin = None
 
         try:
@@ -170,7 +171,9 @@ def launch():
         action, reason = 'stuck', 'boot check failed'
 
     if action == 'stuck':
-        recovery.stuck_forever(reason)
+        # Never reset from here: if recovery itself is what fails, a reset
+        # would loop forever with no signal.
+        recovery.stuck_forever(reason, rollback_trial=False)
         return
 
     dev = recovery.dev_mode()

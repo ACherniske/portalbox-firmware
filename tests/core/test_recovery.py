@@ -220,6 +220,64 @@ def run():
         recovery.note_wifi_failure()
         assert _count() == 0, "crash_count went to %d" % _count()
 
+    def test_wifi_failure_breaks_run():
+        # "3 unhealthy boots in a row": a WiFi-failure boot ends the run, so
+        # rare crashes spread over a long outage never add up to stuck.
+        recovery.on_boot(False)
+        recovery.on_boot(False)
+        recovery.on_boot(False)
+        recovery.note_wifi_failure()
+        assert _count() == 0, "crash_count %d after wifi failure" % _count()
+        for i in range(3):
+            got = recovery.on_boot(False)
+            assert got == ('run', ''), "crash %d after outage: %r" % (i + 1, got)
+
+    def test_dev_mode_writes_no_state():
+        _write(recovery.DEV_FLAG_PATH, '')
+        recovery.mark_healthy()
+        recovery.note_wifi_failure()
+        assert not _exists(recovery.STATE_PATH), "dev mode wrote %s" % recovery.STATE_PATH
+
+    def test_read_error_not_corrupt():
+        # Only a missing file means "no state". A flash or memory error must
+        # not silently reset the state (that would drop a trial or bad list).
+        _set_count(2)
+
+        def eio(*args, **kwargs):
+            raise OSError(5)
+
+        def enoent(*args, **kwargs):
+            raise OSError(2)
+
+        class _NoMemJson:
+            dump = recovery.json.dump
+
+            @staticmethod
+            def loads(text):
+                raise MemoryError()
+
+        real_json = recovery.json
+        for name, value, want in (('open', eio, OSError), ('json', _NoMemJson, MemoryError)):
+            setattr(recovery, name, value)
+            try:
+                recovery.load_state()
+                raised = None
+            except Exception as e:
+                raised = e
+            finally:
+                if name == 'open':
+                    del recovery.open
+                else:
+                    recovery.json = real_json
+            assert isinstance(raised, want), "%s: load_state gave %r" % (name, raised)
+        assert _count() == 2, "state changed to %d" % _count()
+        recovery.open = enoent
+        try:
+            got = recovery.load_state()['crash_count']
+        finally:
+            del recovery.open
+        assert got == 0, "missing file gave count %d" % got
+
     def test_dev_mode_never_counts():
         _set_count(3)
         _write(recovery.DEV_FLAG_PATH, '')
@@ -299,7 +357,7 @@ def run():
         try:
             # No pin names at all: buzzer on 4, LEDs skipped and logged.
             _with_pins(_Stub(), lambda: recovery.stuck_forever('t', beep_ms=1, period_ms=2, cycles=2))
-            assert fake.ons(4) == 2, "fallback buzzer 4 beeped %d times" % fake.ons(4)
+            assert fake.ons(4) == 2, "buzzer 4 beeped %d times" % fake.ons(4)
             assert not fake.spi_writes, "LEDs written without pin names"
             log = _read(recovery.LOG_PATH) or ''
             assert 'no LEDs' in log, "LED failure not logged: %r" % log
@@ -338,6 +396,9 @@ def run():
     runner.run_test("Healthy clears count", fresh(test_healthy_clears_count))
     runner.run_test("Power-on clears count", fresh(test_power_on_clears_count))
     runner.run_test("WiFi failure is not a crash", fresh(test_wifi_failure_not_a_crash))
+    runner.run_test("WiFi failure ends the unhealthy run", fresh(test_wifi_failure_breaks_run))
+    runner.run_test("Dev mode writes no state", fresh(test_dev_mode_writes_no_state))
+    runner.run_test("Read error is raised, not a reset", fresh(test_read_error_not_corrupt))
     runner.run_test("Dev mode never counts", fresh(test_dev_mode_never_counts))
     runner.run_test("Corrupt state resets", fresh(test_corrupt_state_resets))
     runner.run_test("Wrong-typed state resets", fresh(test_wrong_type_resets))

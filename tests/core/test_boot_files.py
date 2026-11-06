@@ -70,8 +70,9 @@ class _StubRecovery:
             raise self.boot_error
         return self.action
 
-    def stuck_forever(self, reason):
+    def stuck_forever(self, reason, rollback_trial=True):
         self.trace.append(('stuck', reason))
+        self.rollback_trial = rollback_trial
 
     def dev_mode(self):
         return self.dev
@@ -90,6 +91,13 @@ class _StubRecovery:
 
 class _NoPins:
     pass
+
+
+class _OtherPins:
+    # Another box's wiring, as the flash tool would write it.
+    BUTTON_PIN = 5
+    RELAY_AC_PIN = 40
+    RELAY_USB_PIN = 41
 
 
 class _BadStr(Exception):
@@ -131,13 +139,17 @@ def _run_file(path, system, pins=None, machine=None, recovery=None):
                 sys.modules[name] = module
 
 
+_LAST = {}
+
+
 def _run_main(action=('run', ''), dev=False, error=None, cause=SOFT_RESET,
-              boot_error=None, log_fails=None):
+              boot_error=None, log_fails=None, pins=None):
     """Run /main.py; returns the trace of anchor, app and reset calls."""
     trace = []
+    _LAST['recovery'] = _StubRecovery(trace, action, dev, boot_error, log_fails)
     _run_file('/main.py', _StubSystem(trace, error),
               machine=_FakeMachine(trace, cause),
-              recovery=_StubRecovery(trace, action, dev, boot_error, log_fails))
+              recovery=_LAST['recovery'], pins=pins)
     return trace
 
 
@@ -192,6 +204,17 @@ def run():
         assert _names(trace) == ['on_boot', 'stuck'], "on_boot error: %r" % trace
         assert _logged(trace, 'boot', 'on_boot failed'), "error not logged: %r" % trace
 
+    def test_boot_check_stuck_no_rollback_reset():
+        # Stuck from the boot check itself must not reset, or a broken
+        # recovery during a trial would reset forever with no signal.
+        _run_main(action=('stuck', 'install recovery failed'))
+        assert _LAST['recovery'].rollback_trial is False, "boot-check stuck may reset"
+
+    def test_safe_mode_button_from_config():
+        _run_main(pins=_OtherPins())
+        inputs = [p for p, m, v in _FakePin.made if m == _FakePin.IN]
+        assert 5 in inputs, "config BUTTON_PIN 5 not read: %r" % (_FakePin.made,)
+
     def test_watchdog_then_app_then_reset():
         trace = _run_main(error=ValueError('boom'))
         assert _names(trace) == ['on_boot', 'arm', 'app', 'reset'], "order: %r" % trace
@@ -241,6 +264,8 @@ def run():
     runner.run_test("Normal boot starts the app once", test_normal_boot_starts_app_once)
     runner.run_test("Stuck boot shows the signal, not the app", test_stuck_shows_signal_not_app)
     runner.run_test("Watchdog armed before app, reset after", test_watchdog_then_app_then_reset)
+    runner.run_test("Boot-check stuck never resets", test_boot_check_stuck_no_rollback_reset)
+    runner.run_test("Safe-mode button pin from config", test_safe_mode_button_from_config)
     runner.run_test("Dev mode: no watchdog, no reset", test_dev_mode_no_watchdog_no_reset)
     runner.run_test("Reset cause logged, power-on reaches on_boot", test_power_on_flag)
     runner.run_test("Ctrl-C or SystemExit logged, then reset", test_interrupt_logged_then_reset)

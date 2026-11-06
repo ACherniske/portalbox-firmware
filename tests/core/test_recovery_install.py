@@ -1,7 +1,7 @@
 import json
 from tests.test_helper import TestRunner
 from tests.core.test_recovery import (
-    ROOT, _REDIRECTS, _exists, _rm_tree, _write, _read,
+    ROOT, _REDIRECTS, _exists, _rm_tree, _write, _read, _FakeMachine,
 )
 import recovery
 
@@ -363,6 +363,110 @@ def run():
         _assert_v1_live("mixed trial")
         assert recovery.load_state()['bad'] == ['v2'], "bad %r" % (recovery.load_state()['bad'],)
 
+    def test_install_refuses_protected():
+        # The anchor, the recovery folders and per-box files are never
+        # replaced or deleted by an update, whatever the OTA code asks.
+        _write(_live('config/wifi_config.json'), 'mine')
+        _write(_live('core/fsm.py'), 'v1')
+        bad = ('boot.py', 'main.py', 'recovery.py', 'ota', 'ota/state.json',
+               'log', 'log/events.log', 'config/wifi_config.json',
+               'config/ota_config.json', 'config/last_time.txt',
+               'config/dev_mode', 'config/pins.py', 'config/settings.py',
+               'config/manifest.json', 'ca-cert.pem', 'config', 'core',
+               '/core/fsm.py', 'core/../main.py', 'core//fsm.py', '', 'core/')
+        # The check comes first, so nothing needs staging to be refused.
+        for p in bad:
+            for files, deletes, managed in (([A, p], [], [A]), ([A], [p], [A]), ([A], [], [A, p])):
+                try:
+                    recovery.install('v2', files, deletes, managed)
+                    raised = None
+                except ValueError as e:
+                    raised = str(e)
+                assert raised is not None and 'protected path' in raised, \
+                    "%r in %r/%r/%r: %r" % (p, files, deletes, managed, raised)
+                assert not _exists(recovery.JOURNAL_PATH), "journal written for %r" % p
+        assert _read(_live('config/wifi_config.json')) == 'mine', "wifi config touched"
+        _assert_v1_live("after refusals")
+        assert recovery.load_state()['trial'] is False, "trial started"
+
+    def test_install_allows_code_folders():
+        # Only per-box paths are protected, not every folder name.
+        _write(_live('core/fsm.py'), 'v1')
+        _write(_stage('core/fsm.py'), 'v2')
+        recovery.install('v2', [A, C, 'core/fsm.py'], [B], [A, C, 'core/fsm.py'])
+        assert _read(_live('core/fsm.py')) == 'v2', "core/fsm.py not installed"
+
+    def quiet_stuck(*args, **kwargs):
+        # A fake machine, so no real relay, LED or buzzer is driven.
+        real_machine = recovery.machine
+        recovery.machine = _FakeMachine()
+        try:
+            recovery.stuck_forever(*args, **kwargs)
+        finally:
+            recovery.machine = real_machine
+
+    def test_trial_stuck_rolls_back():
+        # A trial version that shows the stuck signal from the app resets,
+        # so the boot counts and the old version comes back (marked bad).
+        _install_v2()
+        resets = []
+        for i in range(3):
+            assert recovery.on_boot(False) == ('run', ''), "trial boot %d" % (i + 1)
+            quiet_stuck('wifi config', beep_ms=1, period_ms=2, cycles=1,
+                                   reset=lambda: resets.append(1))
+            assert len(resets) == i + 1, "stuck in trial did not reset (boot %d)" % (i + 1)
+        assert 'stuck during trial' in (_read(recovery.LOG_PATH) or ''), "not logged"
+        recovery.on_boot(False)
+        _assert_v1_live("after stuck trial")
+        assert recovery.load_state()['bad'] == ['v2'], "bad %r" % (recovery.load_state()['bad'],)
+
+    def test_stuck_no_reset_unless_trial_from_app():
+        resets = []
+        # Committed version: stuck stays stuck.
+        quiet_stuck('t', beep_ms=1, period_ms=2, cycles=1,
+                               reset=lambda: resets.append(1))
+        assert resets == [], "stuck reset a committed version"
+        # The boot check itself (rollback_trial=False): no reset loop.
+        _install_v2()
+        quiet_stuck('t', beep_ms=1, period_ms=2, cycles=1,
+                               rollback_trial=False, reset=lambda: resets.append(1))
+        assert resets == [], "boot-check stuck reset during a trial"
+
+    def test_journal_read_error_kept():
+        _write_journal('installing')
+
+        def eio(*args, **kwargs):
+            raise OSError(5)
+
+        recovery.open = eio
+        try:
+            got = recovery.on_boot(False)
+        finally:
+            del recovery.open
+        assert got == ('stuck', 'install recovery failed'), "boot %r" % (got,)
+        assert _exists(recovery.JOURNAL_PATH), "journal removed on a read error"
+
+        # Out of memory while parsing it: not corrupt either.
+        class _NoMemJson:
+            dump = recovery.json.dump
+
+            @staticmethod
+            def loads(text):
+                raise MemoryError()
+
+        real_json = recovery.json
+        recovery.json = _NoMemJson
+        try:
+            try:
+                recovery._load_journal()
+                raised = None
+            except MemoryError as e:
+                raised = e
+        finally:
+            recovery.json = real_json
+        assert raised is not None, "MemoryError swallowed"
+        assert _exists(recovery.JOURNAL_PATH), "journal removed on MemoryError"
+
     def test_clear_state_wipes():
         _install_v2()
         recovery.clear_state()
@@ -396,6 +500,11 @@ def run():
     runner.run_test("Install pending refused", fresh(test_install_pending_refused))
     runner.run_test("Corrupt journal is dropped", fresh(test_corrupt_journal))
     runner.run_test("Mixed WiFi and crash trial is bad", fresh(test_mixed_trial_is_bad))
+    runner.run_test("Install refuses protected paths", fresh(test_install_refuses_protected))
+    runner.run_test("Install allows files in code folders", fresh(test_install_allows_code_folders))
+    runner.run_test("Stuck during trial resets and rolls back", fresh(test_trial_stuck_rolls_back))
+    runner.run_test("Stuck resets only for a trial, from the app", fresh(test_stuck_no_reset_unless_trial_from_app))
+    runner.run_test("Journal read error keeps the journal", fresh(test_journal_read_error_kept))
 
     # Leave the board as we found it.
     _rm_tree(ROOT)

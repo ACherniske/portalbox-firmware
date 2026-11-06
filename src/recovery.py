@@ -21,6 +21,13 @@ MAX_BOOTS = 3
 LOG_MAX = 16384
 WDT_MS = 30000
 ANCHOR_FILES = ('boot.py', 'main.py', 'recovery.py')
+# Per-box: everything under config/ (wiring, settings, WiFi, OTA) and the
+# WiFi CA cert are written by the flash tool (or by hand), never by an
+# update. So the anchor can trust config/pins.py.
+LOCAL_DIRS = ('config', 'ota', 'log')
+LOCAL_FILES = ('ca-cert.pem',)
+
+ENOENT = 2
 
 _wdt = None
 
@@ -96,22 +103,32 @@ def _valid(saved, defaults):
     return True
 
 
+def _read_text(path):
+    """The file's text, or None if it does not exist. Any other error
+    (flash, memory) is raised: it says nothing about the file itself."""
+    try:
+        with open(path, 'r') as f:
+            return f.read()
+    except OSError as e:
+        if e.errno == ENOENT:
+            return None
+        raise
+
+
 def load_state():
     """The saved state, with defaults for missing keys.
 
     A missing file gives the defaults. A file that is not valid JSON, or has a
     wrong-typed field, also gives the defaults and is logged, so a bad file
-    can never stop the box from booting.
+    can never stop the box from booting. A read error is raised instead.
     """
     state = _defaults()
-    try:
-        with open(STATE_PATH, 'r') as f:
-            text = f.read()
-    except OSError:
+    text = _read_text(STATE_PATH)
+    if text is None:
         return state
     try:
         saved = json.loads(text)
-    except Exception:
+    except ValueError:
         saved = None
     if not _valid(saved, state):
         log('state', 'state reset: bad %s' % STATE_PATH)
@@ -187,21 +204,36 @@ def _stage(path):
 
 
 def _load_journal():
-    """The journal, or None. An unreadable one is logged and removed."""
-    try:
-        with open(JOURNAL_PATH, 'r') as f:
-            text = f.read()
-    except OSError:
+    """The journal, or None. A corrupt one is logged and removed; a read
+    error is raised, so the journal survives for the next boot."""
+    text = _read_text(JOURNAL_PATH)
+    if text is None:
         return None
     try:
         journal = json.loads(text)
         for key in ('status', 'version', 'prev_version', 'files', 'deletes', 'new', 'prev_managed'):
             journal[key]  # KeyError (or TypeError if not a dict) -> unreadable
         return journal
-    except Exception:
+    except (ValueError, KeyError, TypeError):
         log('install', 'journal unreadable, removed')
         _remove(JOURNAL_PATH)
         return None
+
+
+def _protected(path):
+    """True for a path an update must never replace or delete."""
+    parts = path.split('/')
+    if not path or '' in parts or '..' in parts:
+        return True  # empty, leading '/', '//', trailing '/', or '..'
+    if path in ANCHOR_FILES or path in LOCAL_FILES:
+        return True
+    if parts[0] in LOCAL_DIRS:
+        return True
+    # A folder: moving it would take every file inside along (config/).
+    try:
+        return os.stat(_live(path))[0] & 0x4000 != 0
+    except OSError:
+        return False
 
 
 def install(version, files, deletes, managed):
@@ -211,8 +243,12 @@ def install(version, files, deletes, managed):
     STAGE_DIR/<path>. Every step is journaled, so a power cut at any point is
     undone by the next on_boot(); any other error undoes it at once and
     re-raises. Raises before touching anything if a trial or another install
-    is pending, a path is listed twice, or a staged file is missing.
+    is pending, a path is listed twice, a staged file is missing, or any
+    path is protected (the anchor, config/, /ota, /log, ca-cert.pem, folders).
     """
+    for p in files + deletes + managed:
+        if _protected(p):
+            raise ValueError('protected path: %r' % (p,))
     state = load_state()
     if state['trial']:
         raise RuntimeError('trial active')
@@ -391,6 +427,8 @@ def on_boot(power_on):
 
 def mark_healthy():
     """The app ran long enough: clear the count, and commit a trial version."""
+    if dev_mode():
+        return
     state = load_state()
     state['crash_count'] = 0
     committing = state['trial']
@@ -405,13 +443,16 @@ def mark_healthy():
 
 
 def note_wifi_failure():
-    """A WiFi failure resets the box but is not a crash: undo this boot's count.
+    """A WiFi failure resets the box but is not a crash: it ends the run of
+    unhealthy boots, so the count starts again from 0.
 
     During a trial it is counted, so a trial that only failed on WiFi is
     rolled back without being marked bad.
     """
+    if dev_mode():
+        return
     state = load_state()
-    state['crash_count'] = max(0, state['crash_count'] - 1)
+    state['crash_count'] = 0
     if state['trial']:
         state['trial_wifi_fails'] += 1
     save_state(state)
@@ -464,11 +505,28 @@ def _leds_red():
         log('stuck', 'no LEDs: %r' % (e,))
 
 
-def stuck_forever(reason, beep_ms=100, period_ms=5000, cycles=None):
+def _on_trial():
+    try:
+        return load_state()['trial']
+    except Exception:
+        return False
+
+
+def stuck_forever(reason, beep_ms=100, period_ms=5000, cycles=None,
+                  rollback_trial=True, reset=None):
     """The 'needs a cable' signal: relays off, all LEDs red, a short beep
     every period_ms. cycles=None loops forever; tests pass a count.
+
+    A trial version that gets here resets instead: the boot counts as a
+    failed trial, so the old version comes back. The boot check passes
+    rollback_trial=False, since resetting there could loop forever.
     """
     relays_low()
+    if rollback_trial and _on_trial():
+        log('stuck', 'stuck during trial: %s, reset' % reason)
+        print('[BOOT] Stuck during trial (%s): reset to roll back' % reason)
+        (reset or machine.reset)()
+        return
     log('stuck', reason)
     print('[BOOT] STUCK (%s): needs a cable' % reason)
     _leds_red()
