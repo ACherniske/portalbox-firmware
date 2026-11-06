@@ -58,6 +58,26 @@ def _count():
     return recovery.load_state()['crash_count']
 
 
+def _exists(path):
+    try:
+        os.stat(path)
+        return True
+    except OSError:
+        return False
+
+
+def _write_flag(path):
+    built = ''
+    for part in path.strip('/').split('/')[:-1]:
+        built += '/' + part
+        try:
+            os.mkdir(built)
+        except OSError:
+            pass
+    with open(path, 'w') as f:
+        f.write('')
+
+
 def _set_count(n):
     state = recovery.load_state()
     state['crash_count'] = n
@@ -182,29 +202,57 @@ def run():
         log = _read(recovery.LOG_PATH) or ''
         assert 'wifi failed, reset in 2 s' in log, "log %r" % log
 
-    # --- Healthy mark -----------------------------------------------------
+    # --- Healthy mark: from the FSM loop, not a separate timer -------------
 
-    def test_healthy_fires():
-        calls = []
-        asyncio.run(app_main._mark_healthy_after(0, mark=lambda: calls.append(1)))
-        assert calls == [1], "mark called %d times" % len(calls)
+    def fsm_with(update):
+        """A DeviceFSM with a fake device and the given update coroutine."""
+        patch.set(fsm_mod, 'get_device', lambda: _Anything())
+        machine_ = fsm_mod.DeviceFSM()
+        machine_._apply_state = lambda: None
+        machine_.update = update
+        return machine_
 
-    def test_healthy_waits():
+    def test_healthy_once_from_loop():
         calls = []
+        loops = []
+
+        async def update():
+            loops.append(1)
+            if len(loops) >= 4:
+                machine_.running = False
+
+        machine_ = fsm_with(update)
+        asyncio.run(machine_.run(mark_healthy=lambda: calls.append(len(loops)),
+                                 healthy_after_ms=150))
+        # Loops are ~100 ms apart: not on the first pass, then exactly once.
+        assert len(calls) == 1, "marked %d times in %d loops" % (len(calls), len(loops))
+        assert calls[0] >= 2, "marked on loop %d, before the delay" % calls[0]
+
+    def test_healthy_not_while_wedged():
+        # The loop is stuck in an await past the deadline: no healthy mark,
+        # so the watchdog reset counts as a crash (or a failed trial).
+        calls = []
+        seen = []
+
+        async def update():
+            await asyncio.sleep_ms(500)
+            machine_.running = False
+
+        async def watch():
+            await asyncio.sleep_ms(350)
+            seen.append(len(calls))
+
+        machine_ = fsm_with(update)
 
         async def go():
-            asyncio.create_task(
-                app_main._mark_healthy_after(1, mark=lambda: calls.append(1)))
-            await asyncio.sleep_ms(300)
-            early = len(calls)
-            await asyncio.sleep_ms(1000)
-            return early
+            asyncio.create_task(watch())
+            await machine_.run(mark_healthy=lambda: calls.append(1),
+                               healthy_after_ms=100)
 
-        early = asyncio.run(go())
-        assert early == 0, "marked healthy before the delay"
-        assert calls == [1], "mark called %d times after the delay" % len(calls)
+        asyncio.run(go())
+        assert seen == [0], "marked healthy while the loop was wedged (%r)" % (seen,)
 
-    # --- Application: healthy task, re-raise after shutdown ----------------
+    # --- Application: healthy hook, re-raise after shutdown ----------------
 
     def fake_app(fsm_run):
         """Patch core.main so Application uses fakes; returns the record."""
@@ -214,14 +262,12 @@ def run():
             def __init__(self):
                 pass
 
-            async def run(self):
+            async def run(self, mark_healthy=None, healthy_after_ms=None):
+                rec['healthy'].append((mark_healthy, healthy_after_ms))
                 await fsm_run()
 
             def stop(self):
                 rec['stop'] += 1
-
-        async def fake_healthy(seconds, mark=None):
-            rec['healthy'].append(seconds)
 
         def fake_cleanup():
             rec['cleanup'] += 1
@@ -229,7 +275,6 @@ def run():
         patch.set(app_main, 'get_device', lambda: _Anything())
         patch.set(app_main, 'DeviceFSM', FakeFSM)
         patch.set(app_main, 'cleanup_device', fake_cleanup)
-        patch.set(app_main, '_mark_healthy_after', fake_healthy)
         return rec
 
     def test_app_starts_healthy():
@@ -239,7 +284,13 @@ def run():
         rec = fake_app(fsm_run)
         assert app_main.HEALTHY_AFTER_S == 60, "HEALTHY_AFTER_S %r" % app_main.HEALTHY_AFTER_S
         asyncio.run(app_main.Application().run())
-        assert rec['healthy'] == [60], "healthy task %r, want [60]" % (rec['healthy'],)
+        assert len(rec['healthy']) == 1, "fsm.run calls %r" % (rec['healthy'],)
+        mark, after = rec['healthy'][0]
+        assert after == 60000, "healthy_after_ms %r, want 60000" % (after,)
+        marks = []
+        patch.set(recovery, 'mark_healthy', lambda: marks.append(1))
+        mark()
+        assert marks == [1], "the hook did not call recovery.mark_healthy"
 
     def test_app_crash_reraises():
         async def fsm_run():
@@ -290,6 +341,48 @@ def run():
         mgr = _wifi_manager([1001, 1001, 1010])
         assert mgr._wait_for_connection() is True, "did not connect: %r" % mgr.last_error
         assert len(feeds) >= 2, "%d feeds over %d polls" % (len(feeds), mgr.nic.polls)
+
+    def test_wifi_time_sync_fed():
+        # NTP's DNS lookup can block for seconds: feed before and after it.
+        events = []
+        patch.set(recovery, 'feed', lambda: events.append('feed'))
+        # The wait loop's own fed sleep must not count as the feed before NTP.
+        patch.set(wifi, '_sleep_fed', lambda s: events.append('wait'))
+        mgr = _wifi_manager([1010])
+        mgr._sync_time = lambda: events.append('ntp')
+        assert mgr._wait_for_connection() is True, "did not connect: %r" % mgr.last_error
+        i = events.index('ntp')
+        assert 0 < i < len(events) - 1, "ntp not between feeds: %r" % (events,)
+        assert events[i - 1] == 'feed' and events[i + 1] == 'feed', "events %r" % (events,)
+
+    def test_wifi_retry_reset_dev_mode():
+        # A bench board without WiFi: no reset loop, no state written.
+        _write_flag(recovery.DEV_FLAG_PATH)
+        resets = []
+        system._wifi_retry_reset(2, sleep=lambda s: None,
+                                 reset=lambda: resets.append(1))
+        assert resets == [], "dev mode reset the box"
+        assert not _exists(recovery.STATE_PATH), "dev mode wrote state"
+
+    def test_boot_returns_on_dev_wifi_fail():
+        rec = fake_boot(wifi_ok=False)
+        patch.set(system, '_wifi_retry_reset', lambda *a, **k: None)
+        main_calls = []
+        patch.set(system, 'main', lambda: main_calls.append(1))
+        got = boot_outcome()
+        assert got == 'returned', "boot %s" % got
+        assert main_calls == [], "app started without WiFi"
+
+    def test_boot_feeds_before_app():
+        fake_boot(wifi_ok=True)
+        events = []
+        patch.set(recovery, 'feed', lambda: events.append('feed'))
+        for name in ('_print_connection_status', '_print_storage_info', '_run_ota'):
+            patch.set(system, name, lambda *a, **k: None)
+        patch.set(system, 'main', lambda: events.append('main'))
+        got = boot_outcome()
+        assert got == 'returned', "boot %s" % got
+        assert events[-2:] == ['feed', 'main'], "events %r" % (events,)
 
     def test_wifi_retry_delay_feeds():
         feeds = feed_counter()
@@ -358,14 +451,18 @@ def run():
         assert rec['stuck'] == [], "WiFi outage showed stuck %r" % (rec['stuck'],)
 
     runner.run_test("WiFi failure resets without counting", fresh(test_wifi_retry_reset))
-    runner.run_test("Healthy mark fires after delay", fresh(test_healthy_fires))
-    runner.run_test("Healthy mark waits its delay", fresh(test_healthy_waits))
-    runner.run_test("App starts the 60 s healthy timer", fresh(test_app_starts_healthy))
+    runner.run_test("Healthy marked once, from the FSM loop", fresh(test_healthy_once_from_loop))
+    runner.run_test("No healthy mark while the loop is wedged", fresh(test_healthy_not_while_wedged))
+    runner.run_test("App asks the FSM for healthy after 60 s", fresh(test_app_starts_healthy))
     runner.run_test("App crash re-raised after shutdown", fresh(test_app_crash_reraises))
     runner.run_test("App interrupt re-raised after shutdown", fresh(test_app_interrupt_reraises))
     runner.run_test("FSM loop feeds the watchdog", fresh(test_fsm_feeds))
     runner.run_test("WiFi wait loop feeds the watchdog", fresh(test_wifi_wait_feeds))
     runner.run_test("WiFi retry delay feeds each second", fresh(test_wifi_retry_delay_feeds))
+    runner.run_test("NTP time sync is fed on both sides", fresh(test_wifi_time_sync_fed))
+    runner.run_test("Dev mode: WiFi failure does not reset", fresh(test_wifi_retry_reset_dev_mode))
+    runner.run_test("Dev mode: boot returns after WiFi failure", fresh(test_boot_returns_on_dev_wifi_fail))
+    runner.run_test("Watchdog fed just before the app starts", fresh(test_boot_feeds_before_app))
     runner.run_test("No WiFi config: stuck 'wifi config'", fresh(test_boot_no_config_stuck))
     runner.run_test("Bad WiFi password: stuck 'wifi config'", fresh(test_boot_bad_password_stuck))
     runner.run_test("WiFi connect failure: retry by reset", fresh(test_boot_connect_fail_retries))

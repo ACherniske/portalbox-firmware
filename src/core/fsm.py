@@ -487,8 +487,13 @@ class DeviceFSM:
     # Main Loop
     # =========================================================================
 
-    async def run(self):
-        """Run FSM loop."""
+    async def run(self, mark_healthy=None, healthy_after_ms=60000):
+        """Run FSM loop.
+
+        mark_healthy is called once, on the first loop pass at least
+        healthy_after_ms after the start. It lives in the loop, not a timer,
+        so a loop stuck in an await is never marked healthy.
+        """
 
         print("[FSM] Starting main loop")
 
@@ -497,11 +502,17 @@ class DeviceFSM:
         # Apply initial state
         self._apply_state()
 
+        start = time.ticks_ms()
+
         while self.running:
 
             await self.update()
 
             recovery.feed()
+
+            if mark_healthy is not None and                     time.ticks_diff(time.ticks_ms(), start) >= healthy_after_ms:
+                mark_healthy()
+                mark_healthy = None
 
             await asyncio.sleep_ms(100)
 

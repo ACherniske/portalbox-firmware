@@ -10,14 +10,13 @@ from core.device import get_device, cleanup_device
 from core.fsm import DeviceFSM
 
 
-# The app counts as healthy once the FSM has run this long: the crash count
-# is cleared and a trial OTA version is committed.
+# The app counts as healthy once the FSM loop has run this long: the crash
+# count is cleared and a trial OTA version is committed.
 HEALTHY_AFTER_S = 60
 
 
-async def _mark_healthy_after(seconds, mark=recovery.mark_healthy):
-    await asyncio.sleep(seconds)
-    mark()
+def _healthy():
+    recovery.mark_healthy()
     print("[APP] Healthy: crash count cleared")
 
 
@@ -78,8 +77,8 @@ class Application:
             self.initialize()
 
             print("[APP] Starting FSM...")
-            asyncio.create_task(_mark_healthy_after(HEALTHY_AFTER_S))
-            await self.fsm.run()
+            await self.fsm.run(mark_healthy=_healthy,
+                               healthy_after_ms=HEALTHY_AFTER_S * 1000)
 
         except KeyboardInterrupt:
 

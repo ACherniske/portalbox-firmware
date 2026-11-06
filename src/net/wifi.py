@@ -393,12 +393,15 @@ class WifiManager:
         self._log("[WiFi] Connected successfully!")
         self._log(f"[WiFi] IP: {ifconfig[0]}")
         self._log(f"[WiFi] Gateway: {ifconfig[2]}")
-        # Network is up; attempt to synchronize system time via NTP
+        # Network is up; attempt to synchronize system time via NTP.
+        # Its DNS lookup can block for seconds: feed on both sides.
+        recovery.feed()
         try:
             self._sync_time()
         except Exception:
             # _sync_time logs its own errors; don't let NTP failures break connection
             pass
+        recovery.feed()
         clock.start_autosave()
         return True
 

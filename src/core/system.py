@@ -226,14 +226,19 @@ def _wifi_retry_reset(delay_s=30, sleep=time.sleep, reset=machine.reset):
     """
     WiFi didn't connect: wait, then reset to try again from a clean boot.
 
-    A WiFi outage is not a crash, so this boot's crash count is undone
-    first (a trial version still counts it, see recovery). The wait is
-    in 1 s steps that feed the watchdog. reset() never returns on the box.
+    A WiFi outage is not a crash, so the crash count starts again (a
+    trial version still counts it, see recovery). The wait is in 1 s
+    steps that feed the watchdog. reset() never returns on the box.
+    In dev mode (a bench board) it only prints and returns.
 
     Args:
         delay_s: seconds to wait before the reset
         sleep, reset: replaced by tests
     """
+
+    if recovery.dev_mode():
+        print('[SYSTEM] WiFi failed (dev mode: no reset)')
+        return
 
     print('[SYSTEM] WiFi failed, reset in %d s' % delay_s)
     recovery.log('wifi', 'failed, reset in %d s' % delay_s)
@@ -298,6 +303,8 @@ def boot():
 
         _wifi_retry_reset()
 
+        return  # dev mode: back to the REPL
+
     # =========================================================
     # WiFi connected — proceed with OTA and launch
     # =========================================================
@@ -321,5 +328,7 @@ def boot():
     print('\n[SYSTEM] Launching main application...\n')
 
     device.startup_sequence()
+
+    recovery.feed()
 
     main()
