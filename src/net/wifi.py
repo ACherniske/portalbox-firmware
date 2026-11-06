@@ -1,6 +1,7 @@
 import network
 import time
 
+import recovery
 from .models import WiFiConfig, NetworkType, NetworkStatus, EAPMethod
 from . import clock
 
@@ -21,6 +22,13 @@ def _release():
 # A failure code fails the wait only after this many polls in a row: the
 # driver keeps retrying and can recover from a brief NO_AP_FOUND or auth fail.
 FAIL_POLLS = 3
+
+
+def _sleep_fed(seconds):
+    """Sleep in 1 s steps, feeding the watchdog so a long wait never trips it."""
+    for _ in range(int(seconds)):
+        recovery.feed()
+        time.sleep(1)
 
 # wlan.status() codes that mean the attempt has failed, and what to tell the user.
 _FAILURE_MESSAGES = {
@@ -375,7 +383,7 @@ class WifiManager:
                 self._log(f"[WiFi] FAILED: {self.last_error}")
                 return False
 
-            time.sleep(1)
+            _sleep_fed(1)
 
         self.connected = True
         self.status = NetworkStatus.GOT_IP
@@ -444,7 +452,7 @@ class WifiManager:
 
             if attempt < self.config.retry_attempts - 1:
                 self._log(f"[WiFi] Retrying in {self.config.retry_delay}s...")
-                time.sleep(self.config.retry_delay)
+                _sleep_fed(self.config.retry_delay)
 
         self._log("[WiFi] All retry attempts failed")
         return False

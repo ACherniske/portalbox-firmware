@@ -6,6 +6,7 @@ import uasyncio as asyncio
 
 from micropython import const
 
+import recovery
 from core.device import get_device
 from core.feedback import apply_feedback
 from config import settings
@@ -499,6 +500,8 @@ class DeviceFSM:
         while self.running:
 
             await self.update()
+
+            recovery.feed()
 
             await asyncio.sleep_ms(100)
 

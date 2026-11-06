@@ -11,7 +11,9 @@
 
 import sys
 import time
+import machine
 
+import recovery
 from net import WiFiConfig, WifiManager, ota
 from core.main import main
 from core.device import get_device
@@ -220,37 +222,28 @@ def _run_ota():
         print('[SYSTEM] OTA scheduler failed: %s' % error)
 
 
-def _offline_lockout(device):
+def _wifi_retry_reset(delay_s=30, sleep=time.sleep, reset=machine.reset):
     """
-    Halt permanently with a visible red-blink warning.
+    WiFi didn't connect: wait, then reset to try again from a clean boot.
 
-    The box has no operational value without connectivity, so rather
-    than continuing to main() when WiFi can't be established, this
-    parks here forever. A power-cycle (after connectivity is fixed)
-    is the only way out.
-
-    This is hand-rolled with direct, synchronous device.led_fill() /
-    device.led_clear() calls rather than device.led_blink(), because
-    led_blink() schedules an asyncio task that requires a running
-    event loop to actually execute — and no loop is running (or ever
-    will be, on this path) at this point in boot().
+    A WiFi outage is not a crash, so this boot's crash count is undone
+    first (a trial version still counts it, see recovery). The wait is
+    in 1 s steps that feed the watchdog. reset() never returns on the box.
 
     Args:
-        device: Device instance
+        delay_s: seconds to wait before the reset
+        sleep, reset: replaced by tests
     """
 
-    print('\n' + '=' * 60)
-    print('OFFLINE — NO OPERATIONAL VALUE WITHOUT CONNECTIVITY')
-    print('Halting. Power-cycle after connectivity is restored.')
-    print('=' * 60)
+    print('[SYSTEM] WiFi failed, reset in %d s' % delay_s)
+    recovery.log('wifi', 'failed, reset in %d s' % delay_s)
+    recovery.note_wifi_failure()
 
-    while True:
+    for _ in range(delay_s):
+        recovery.feed()
+        sleep(1)
 
-        device.led_fill('RED')
-        time.sleep_ms(400)
-
-        device.led_clear()
-        time.sleep_ms(1200)
+    reset()
 
 
 def boot():
@@ -277,8 +270,8 @@ def boot():
 
     if not _load_wifi_config(config):
 
-        _offline_lockout(device)
-        # unreachable — _offline_lockout() never returns
+        # A bad config can't fix itself: show the stuck signal.
+        recovery.stuck_forever('wifi config')
 
     # =========================================================
     # Decrypt password
@@ -288,8 +281,8 @@ def boot():
 
     if not password:
 
-        _offline_lockout(device)
-        # unreachable — _offline_lockout() never returns
+        # A bad config can't fix itself: show the stuck signal.
+        recovery.stuck_forever('wifi config')
 
     # =========================================================
     # Connect WiFi
@@ -303,8 +296,7 @@ def boot():
 
         print('[SYSTEM] WiFi unavailable')
 
-        _offline_lockout(device)
-        # unreachable — _offline_lockout() never returns
+        _wifi_retry_reset()
 
     # =========================================================
     # WiFi connected — proceed with OTA and launch

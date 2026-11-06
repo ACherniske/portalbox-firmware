@@ -52,8 +52,8 @@ PROFILES = {
     'offline': {
         # Retained for any future ASYNC use (e.g. the FSM signaling a
         # lost connection mid-operation, where an event loop really
-        # is running). The boot-time "no connectivity" path in
-        # core/system.py does NOT use this profile, it uses _offline_lockout() instead.
+        # is running). At boot, core/system.py does not use it: a WiFi
+        # failure resets the box and a bad WiFi config shows the stuck signal.
         'led': {'mode': 'blink', 'color': 'RED', 'on_ms': 400, 'off_ms': 1200},
         'buzzer': None,
     },
