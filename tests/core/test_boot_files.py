@@ -100,6 +100,11 @@ class _OtherPins:
     RELAY_USB_PIN = 41
 
 
+class _BrokenRecovery:
+    def relays_low(self):
+        raise MemoryError()
+
+
 class _BadStr(Exception):
     """An error that can't even be turned into text (as when memory is out)."""
 
@@ -215,6 +220,17 @@ def run():
         inputs = [p for p, m, v in _FakePin.made if m == _FakePin.IN]
         assert 5 in inputs, "config BUTTON_PIN 5 not read: %r" % (_FakePin.made,)
 
+    def test_boot_survives_broken_recovery():
+        for pins, want in ((_NoPins(), (18, 9)), (_OtherPins(), (40, 41))):
+            try:
+                _run_file('/boot.py', _StubSystem(), pins=pins, recovery=_BrokenRecovery())
+                raised = None
+            except BaseException as e:
+                raised = e
+            assert raised is None, "boot.py raised %r" % (raised,)
+            for pin in want:
+                assert _driven_low(pin), "relay %d not driven low: %r" % (pin, _FakePin.made)
+
     def test_watchdog_then_app_then_reset():
         trace = _run_main(error=ValueError('boom'))
         assert _names(trace) == ['on_boot', 'arm', 'app', 'reset'], "order: %r" % trace
@@ -266,6 +282,7 @@ def run():
     runner.run_test("Watchdog armed before app, reset after", test_watchdog_then_app_then_reset)
     runner.run_test("Boot-check stuck never resets", test_boot_check_stuck_no_rollback_reset)
     runner.run_test("Safe-mode button pin from config", test_safe_mode_button_from_config)
+    runner.run_test("boot.py survives a broken recovery", test_boot_survives_broken_recovery)
     runner.run_test("Dev mode: no watchdog, no reset", test_dev_mode_no_watchdog_no_reset)
     runner.run_test("Reset cause logged, power-on reaches on_boot", test_power_on_flag)
     runner.run_test("Ctrl-C or SystemExit logged, then reset", test_interrupt_logged_then_reset)
