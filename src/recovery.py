@@ -120,25 +120,265 @@ def load_state():
     return state
 
 
-def save_state(state):
+def _write_json(path, obj):
     """Write to a temp file, then rename over, so a power cut keeps the old file."""
-    _make_parent(STATE_PATH)
-    tmp = STATE_PATH + '.tmp'
+    _make_parent(path)
+    tmp = path + '.tmp'
     with open(tmp, 'w') as f:
-        json.dump(state, f)
-    os.rename(tmp, STATE_PATH)
+        json.dump(obj, f)
+    os.rename(tmp, path)
+
+
+def save_state(state):
+    _write_json(STATE_PATH, state)
+
+
+def _remove(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _rename(src, dst):
+    _make_parent(dst)
+    os.rename(src, dst)
+
+
+def _rm_tree(path):
+    try:
+        is_dir = os.stat(path)[0] & 0x4000
+    except OSError:
+        return
+    if is_dir:
+        for name in os.listdir(path):
+            _rm_tree(path + '/' + name)
+        os.rmdir(path)
+    else:
+        os.remove(path)
+
+
+def _prune(path):
+    """Remove the live folders above `path` that are now empty.
+
+    MicroPython imports a folder before name.py, so an empty folder left
+    behind would shadow a module of the same name. Stops at the first
+    folder that still has files; never touches LIVE_ROOT itself.
+    """
+    parts = path.split('/')[:-1]
+    while parts:
+        try:
+            os.rmdir(_live('/'.join(parts)))
+        except OSError:
+            return
+        parts.pop()
+
+
+def _live(path):
+    return LIVE_ROOT + '/' + path
+
+
+def _prev(path):
+    return PREV_DIR + '/' + path
+
+
+def _stage(path):
+    return STAGE_DIR + '/' + path
+
+
+def _load_journal():
+    """The journal, or None. An unreadable one is logged and removed."""
+    try:
+        with open(JOURNAL_PATH, 'r') as f:
+            text = f.read()
+    except OSError:
+        return None
+    try:
+        journal = json.loads(text)
+        for key in ('status', 'version', 'prev_version', 'files', 'deletes', 'new', 'prev_managed'):
+            journal[key]  # KeyError (or TypeError if not a dict) -> unreadable
+        return journal
+    except Exception:
+        log('install', 'journal unreadable, removed')
+        _remove(JOURNAL_PATH)
+        return None
+
+
+def install(version, files, deletes, managed):
+    """Swap the staged files in and start a trial of `version`.
+
+    Paths have no leading slash ('core/fsm.py'); staged copies are at
+    STAGE_DIR/<path>. Every step is journaled, so a power cut at any point is
+    undone by the next on_boot(); any other error undoes it at once and
+    re-raises. Raises before touching anything if a trial or another install
+    is pending, a path is listed twice, or a staged file is missing.
+    """
+    state = load_state()
+    if state['trial']:
+        raise RuntimeError('trial active')
+    if _exists(JOURNAL_PATH):
+        raise RuntimeError('install pending')
+    if len(set(files + deletes)) != len(files) + len(deletes):
+        raise ValueError('path listed twice')
+    for f in files:
+        if not _exists(_stage(f)):
+            raise ValueError('not staged: ' + f)
+    # Old copies left by an earlier power cut must never be restored.
+    _rm_tree(PREV_DIR)
+    journal = {
+        'v': 1,
+        'status': 'installing',
+        'version': version,
+        'prev_version': state['version'],
+        'files': files,
+        'deletes': deletes,
+        # Files with no live copy yet: the only ones a rollback removes.
+        'new': [f for f in files if not _exists(_live(f))],
+        'prev_managed': state['managed'],
+    }
+    _write_json(JOURNAL_PATH, journal)
+    try:
+        for f in files:
+            if _exists(_live(f)):
+                _rename(_live(f), _prev(f))
+            _rename(_stage(f), _live(f))
+        for d in deletes:
+            if _exists(_live(d)):
+                _rename(_live(d), _prev(d))
+                _prune(d)
+    except Exception as e:
+        log('install', 'install %s failed: %r' % (version, e))
+        rollback(False)
+        raise
+    # State before journal: a cut between the two leaves the journal at
+    # 'installing', so the next boot undoes the install instead of
+    # mistaking it for a finished commit.
+    state['version'] = version
+    state['prev_version'] = journal['prev_version']
+    state['managed'] = managed
+    state['trial'] = True
+    state['trial_boots'] = 0
+    state['trial_wifi_fails'] = 0
+    state['crash_count'] = 0
+    save_state(state)
+    journal['status'] = 'trial'
+    _write_json(JOURNAL_PATH, journal)
+    log('install', 'install %s (%d files, %d deletes)' % (version, len(files), len(deletes)))
+    _rm_tree(STAGE_DIR)
+
+
+def rollback(mark_bad):
+    """Put back the files the journaled install replaced. Safe to re-run.
+
+    The journal is marked 'rolling_back' first, so a power cut part way
+    through is finished by the next on_boot() with the same mark_bad.
+    """
+    journal = _load_journal()
+    if journal is None:
+        return
+    if journal['status'] == 'rolling_back':
+        mark_bad = journal.get('mark_bad', mark_bad)
+    else:
+        journal['status'] = 'rolling_back'
+        journal['mark_bad'] = mark_bad
+        _write_json(JOURNAL_PATH, journal)
+    for f in journal['files']:
+        if _exists(_prev(f)):
+            _remove(_live(f))
+            _rename(_prev(f), _live(f))
+        elif f in journal['new']:
+            _remove(_live(f))
+            _prune(f)
+        # Otherwise it was never moved, or is already back. Leave it.
+    for d in journal['deletes']:
+        if _exists(_prev(d)):
+            _remove(_live(d))
+            _rename(_prev(d), _live(d))
+    state = load_state()
+    state['version'] = journal['prev_version']
+    state['prev_version'] = None
+    state['managed'] = journal['prev_managed']
+    state['trial'] = False
+    state['trial_boots'] = 0
+    state['trial_wifi_fails'] = 0
+    state['crash_count'] = 0
+    if mark_bad and journal['version'] not in state['bad']:
+        state['bad'].append(journal['version'])
+    save_state(state)
+    # Folders before the journal: a cut here re-runs the rollback, which is
+    # safe because every file is already back.
+    _rm_tree(STAGE_DIR)
+    _rm_tree(PREV_DIR)
+    _remove(JOURNAL_PATH)
+    log('install', 'rollback %s bad=%s' % (journal['version'], mark_bad))
+
+
+def _finish_commit():
+    # The state was saved first. Old copies go before the journal, so a cut
+    # here leaves the journal and the next boot finishes the commit.
+    _rm_tree(PREV_DIR)
+    _remove(JOURNAL_PATH)
+
+
+def clear_state():
+    """Forget every update: state, journal, old and staged copies.
+
+    For a box flashed by hand. Live files are left as they are.
+    """
+    for path in (STATE_PATH, STATE_PATH + '.tmp', JOURNAL_PATH, JOURNAL_PATH + '.tmp'):
+        _remove(path)
+    _rm_tree(PREV_DIR)
+    _rm_tree(STAGE_DIR)
+
+
+def _finish_interrupted(journal, state):
+    """Complete whatever a power cut stopped. Returns the state afterwards."""
+    if journal is None:
+        if state['trial']:
+            # Nothing to roll back to; keep the files and stop the trial.
+            state['trial'] = False
+            save_state(state)
+            log('install', 'trial without journal cleared')
+        return state
+    status = journal['status']
+    if status == 'installing':
+        rollback(False)
+        log('install', 'interrupted install undone')
+    elif status == 'rolling_back':
+        rollback(False)  # reuses the mark_bad saved in the journal
+        log('install', 'interrupted rollback finished')
+    elif status == 'trial' and not state['trial']:
+        _finish_commit()
+        log('install', 'interrupted commit finished')
+    return load_state()
 
 
 def on_boot(power_on):
     """Decide whether this boot runs the app. Returns ('run', '') or ('stuck', reason).
 
-    Each boot adds one to crash_count; mark_healthy() clears it. A power-on
-    reset clears it first, so a box someone has unplugged starts clean.
-    Dev mode never counts.
+    First finishes any install, rollback or commit a power cut stopped.
+    While a new version is on trial, each boot counts a trial boot (power-on
+    does not clear it); after MAX_BOOTS without mark_healthy() it is rolled
+    back, marked bad unless every failed boot was a WiFi failure.
+    Otherwise each boot adds one to crash_count; mark_healthy() clears it.
+    A power-on reset clears it first, so a box someone has unplugged starts
+    clean. Dev mode never counts.
     """
     if dev_mode():
         return ('run', '')
-    state = load_state()
+    try:
+        state = _finish_interrupted(_load_journal(), load_state())
+        if state['trial']:
+            if state['trial_boots'] < MAX_BOOTS:
+                state['trial_boots'] += 1
+                save_state(state)
+                return ('run', '')
+            rollback(state['trial_wifi_fails'] < state['trial_boots'])
+            state = load_state()
+    except Exception as e:
+        # The files may be half old, half new: running the app is unsafe.
+        log('boot', 'stuck: install recovery failed: %r' % (e,))
+        return ('stuck', 'install recovery failed')
     if power_on:
         state['crash_count'] = 0
     if state['crash_count'] >= MAX_BOOTS:
@@ -150,15 +390,30 @@ def on_boot(power_on):
 
 
 def mark_healthy():
+    """The app ran long enough: clear the count, and commit a trial version."""
     state = load_state()
     state['crash_count'] = 0
+    committing = state['trial']
+    if committing:
+        state['trial'] = False
+        state['trial_boots'] = 0
+        state['trial_wifi_fails'] = 0
     save_state(state)
+    if committing:
+        _finish_commit()
+        log('install', 'commit %s' % state['version'])
 
 
 def note_wifi_failure():
-    """A WiFi failure resets the box but is not a crash: undo this boot's count."""
+    """A WiFi failure resets the box but is not a crash: undo this boot's count.
+
+    During a trial it is counted, so a trial that only failed on WiFi is
+    rolled back without being marked bad.
+    """
     state = load_state()
     state['crash_count'] = max(0, state['crash_count'] - 1)
+    if state['trial']:
+        state['trial_wifi_fails'] += 1
     save_state(state)
 
 
