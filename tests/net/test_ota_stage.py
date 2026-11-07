@@ -404,26 +404,38 @@ def run():
         seen = []
 
         def fake_get(url, headers=None, sink=None, max_bytes=65536):
-            seen.append((url, headers, sink is not None))
+            seen.append((url, headers, sink is not None, 'get'))
             if url.startswith(BLOBS):
                 return fetch.by_blob_url(url, sink)
-            if url.startswith(API):
-                return json.dumps(github(url[len(API):])).encode()
-            raise HttpError(404)   # raw.githubusercontent.com or anything else
+            raise HttpError(404)   # JSON must come through get_json; raw host gone
 
-        real = https.get
-        https.get = fake_get
+        def fake_get_json(url, headers=None, max_bytes=65536):
+            seen.append((url, headers, False, 'json'))
+            if url.startswith(API) and not url.startswith(BLOBS):
+                return github(url[len(API):])
+            raise HttpError(404)
+
+        real = https.get, https.get_json
+        https.get, https.get_json = fake_get, fake_get_json
         try:
             cfg = dict(CFG)
             cfg['token'] = token
             got = ota.run_update(cfg, True, reset=_Reset())
         finally:
-            https.get = real
+            https.get, https.get_json = real
         return got, seen, fetch
+
+    def test_api_json_streamed():
+        got, seen, fetch = via_https()
+        assert got == 'installed ' + C1, "result %r" % got
+        api = [(u, kind) for u, _, sink, kind in seen if not sink]
+        assert len(api) == 3, "api requests %r" % api
+        for url, kind in api:
+            assert kind == 'json', "%s read with %s" % (url[-40:], kind)
 
     def test_files_from_api_blobs():
         got, seen, fetch = via_https()
-        files = sorted(u for u, _, sink in seen if sink)
+        files = sorted(u for u, _, sink, _k in seen if sink)
         want = sorted(BLOBS + _git_sha(_v2()[p]) for p in CHANGED)
         assert files == want, "file URLs %r" % files
         assert got == 'installed ' + C1, "result %r" % got
@@ -431,7 +443,7 @@ def run():
     def test_default_fetchers_send_token():
         got, seen, fetch = via_https()
         assert got == 'installed ' + C1, "result %r" % got
-        for url, headers, sink in seen:
+        for url, headers, sink, _k in seen:
             want = {'Authorization': 'Bearer tok'}
             if sink:
                 want['Accept'] = RAW_MEDIA   # the bytes, not base64 JSON
@@ -543,6 +555,7 @@ def run():
     runner.run_test("Install refused, stage removed", fresh(test_install_refused_stage_removed))
     runner.run_test("Failure text names the cause", fresh(test_failed_text))
     runner.run_test("Files come from the API by blob sha", fresh(test_files_from_api_blobs))
+    runner.run_test("API JSON parsed from the stream", fresh(test_api_json_streamed))
     runner.run_test("Default fetchers send the token, blobs as raw bytes", fresh(test_default_fetchers_send_token))
     runner.run_test("Delete-only update installs", fresh(test_delete_only_installs))
     runner.run_test("Install that leaves its journal resets", fresh(test_journal_left_resets))

@@ -4,6 +4,8 @@ The fork's requests module turns certificate checks off, so OTA downloads
 use this instead. The server must chain to a root in ROOTS_PATH and match
 the host name; anything else raises before a byte of the body is read.
 """
+import io
+import json
 import socket
 import tls
 
@@ -114,6 +116,46 @@ def _read_body(stream, reply, sink, max_bytes):
     return total
 
 
+class _JsonBody(io.IOBase):
+    """The reply body as a stream for json.load, read CHUNK bytes at a
+    time, so a big reply is never held whole. Same limits as _read_body:
+    over max_bytes or short of Content-Length -> HttpError(0)."""
+
+    def __init__(self, stream, reply, max_bytes):
+        length = reply.get('content-length')
+        self.length = int(length) if length is not None else None
+        if self.length is not None and self.length > max_bytes:
+            raise HttpError(0, 'body over %d bytes' % max_bytes)
+        self.stream = stream
+        self.max_bytes = max_bytes
+        self.total = 0
+        self.buf = b''
+        self.pos = 0
+
+    def _fill(self):
+        want = CHUNK if self.length is None else min(CHUNK, self.length - self.total)
+        chunk = self.stream.read(want) if want > 0 else b''
+        if not chunk:
+            if self.length is not None and self.total < self.length:
+                raise HttpError(0, 'short read')
+            return False
+        self.total += len(chunk)
+        if self.total > self.max_bytes:
+            raise HttpError(0, 'body over %d bytes' % self.max_bytes)
+        self.buf = chunk
+        self.pos = 0
+        recovery.feed()
+        return True
+
+    def readinto(self, out):
+        if self.pos >= len(self.buf) and not self._fill():
+            return 0
+        n = min(len(out), len(self.buf) - self.pos)
+        out[:n] = self.buf[self.pos:self.pos + n]
+        self.pos += n
+        return n
+
+
 def get(url, headers=None, sink=None, max_bytes=65536):
     """GET an https URL. Returns the body, or with sink the byte count.
 
@@ -122,6 +164,19 @@ def get(url, headers=None, sink=None, max_bytes=65536):
     (no sink) or shorter than Content-Length -> HttpError(0). With sink,
     each chunk (<= CHUNK bytes) goes to sink.write.
     """
+    return _get(url, headers, lambda stream, reply: _read_body(stream, reply, sink, max_bytes))
+
+
+def get_json(url, headers=None, max_bytes=65536):
+    """GET an https URL and parse its JSON body as it arrives.
+
+    Like get() without a sink, but the body is never held whole: a reply
+    of several KB needs no single block that big on the heap.
+    """
+    return _get(url, headers, lambda stream, reply: json.load(_JsonBody(stream, reply, max_bytes)))
+
+
+def _get(url, headers, read):
     sent = {'User-Agent': USER_AGENT}
     sent.update(headers or {})
     for hop in range(MAX_REDIRECTS + 1):
@@ -136,6 +191,6 @@ def get(url, headers=None, sink=None, max_bytes=65536):
                 continue
             if status != 200:
                 raise HttpError(status)
-            return _read_body(stream, reply, sink, max_bytes)
+            return read(stream, reply)
         finally:
             stream.close()

@@ -105,9 +105,41 @@ class FakeStream:
         self.closed = True
 
 
+class LazyStream(FakeStream):
+    """head + `pad` spaces + tail, made as it is read: a body far bigger
+    than the heap that the test itself never holds."""
+
+    def __init__(self, head, pad, tail):
+        self.parts = [head, pad, tail]
+        self.size = len(head) + pad + len(tail)
+        self.taken = 0
+        self.closed = False
+
+    def read(self, n):
+        out = b''
+        while n > 0 and self.parts:
+            part = self.parts[0]
+            if isinstance(part, int):
+                k = min(n, part)
+                out += b' ' * k
+                self.parts[0] = part - k
+                if not self.parts[0]:
+                    self.parts.pop(0)
+            else:
+                out += part[:n]
+                k = min(n, len(part))
+                self.parts[0] = part[n:]
+                if not self.parts[0]:
+                    self.parts.pop(0)
+            n -= k
+        self.taken += len(out)
+        return out
+
+
 class FakeNet:
     """Stands in for https._request: plays scripted responses and records
-    (host, path, headers) of each call and the streams it handed out."""
+    (host, path, headers) of each call and the streams it handed out. A
+    body may be bytes or a ready stream (LazyStream)."""
 
     def __init__(self, responses):
         self.responses = list(responses)
@@ -117,7 +149,7 @@ class FakeNet:
     def __call__(self, host, path, headers):
         self.calls.append((host, path, dict(headers)))
         status, hdrs, body = self.responses.pop(0)
-        stream = FakeStream(body)
+        stream = body if hasattr(body, 'read') else FakeStream(body)
         self.streams.append(stream)
         return status, hdrs, stream
 
@@ -403,6 +435,56 @@ def test_over_max_without_length():
     _with_fake([(200, {}, b'x' * 101)], run)
 
 
+def test_json_streamed_not_held():
+    """200 KB of JSON parses though it would never fit in the heap whole:
+    get_json parses as the bytes arrive (the OTA tree reply failed with a
+    MemoryError when its 9.5 KB body was joined on a fragmented heap)."""
+    body = LazyStream(b'{"tree": [1, 2], ', 200000, b'"ok": true}')
+    def run(fake):
+        got = https.get_json('https://a.example/', max_bytes=300000)
+        assert got == {'tree': [1, 2], 'ok': True}, repr(got)
+        assert fake.all_closed(), 'stream left open'
+    _with_fake([(200, {'content-length': str(body.size)}, body)], run)
+
+
+def test_json_over_max_is_error():
+    def run(fake):
+        _expect_http_error(lambda: https.get_json('https://a.example/', max_bytes=100), 0)
+        assert fake.streams[0].taken == 0, 'read %d bytes' % fake.streams[0].taken
+        _expect_http_error(lambda: https.get_json('https://a.example/', max_bytes=100), 0)
+    _with_fake([(200, {'content-length': '5000'}, b'[' + b' ' * 4998 + b']'),
+                (200, {}, b'[' + b' ' * 200 + b']')], run)
+
+
+def test_json_short_body_is_error():
+    def run(fake):
+        _expect_http_error(lambda: https.get_json('https://a.example/'), 0)
+    _with_fake([(200, {'content-length': '50'}, b'{"a": "only part')], run)
+
+
+def test_json_feeds_while_reading():
+    body = LazyStream(b'[', 20000, b']')
+    feeds = [0]
+    real_feed = recovery.feed
+
+    def counting_feed():
+        feeds[0] += 1
+    recovery.feed = counting_feed
+    try:
+        _with_fake([(200, {'content-length': str(body.size)}, body)],
+                   lambda fake: https.get_json('https://a.example/'))
+    finally:
+        recovery.feed = real_feed
+    assert feeds[0] >= 20000 // https.CHUNK, 'fed %d times for 20 KB' % feeds[0]
+
+
+def test_json_non_200_is_error():
+    def run(fake):
+        _expect_http_error(lambda: https.get_json('https://a.example/'), 404)
+        assert fake.all_closed(), 'stream left open'
+    _with_fake([(404, {}, b'{"message": "Not Found"}')], run)
+
+
 def test_non_200_is_error():
     def run(fake):
         _expect_http_error(lambda: https.get('https://a.example/'), 500)
@@ -424,6 +506,11 @@ def run():
     runner.run_test("No Content-Length reads to the end", test_no_length_reads_to_end)
     runner.run_test("Over max_bytes without length", test_over_max_without_length)
     runner.run_test("Non-200 is an error", test_non_200_is_error)
+    runner.run_test("JSON parsed as it arrives, never held whole", test_json_streamed_not_held)
+    runner.run_test("JSON over max_bytes is an error", test_json_over_max_is_error)
+    runner.run_test("Short JSON body is an error", test_json_short_body_is_error)
+    runner.run_test("Feeds while reading JSON", test_json_feeds_while_reading)
+    runner.run_test("JSON non-200 is an error", test_json_non_200_is_error)
     runner.run_test("Feeds after DNS and after the reply head", test_feeds_after_dns_and_head)
     runner.run_test("GitHub API over verified TLS", test_api_over_verified_tls)
     runner.run_test("Raw file matches its blob hash", test_raw_file_matches_blob_hash)

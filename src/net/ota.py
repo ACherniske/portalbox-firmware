@@ -297,7 +297,7 @@ def _update(cfg, abort, get_json, fetch):
     auth = {'Authorization': 'Bearer ' + cfg['token']} if cfg.get('token') else {}
 
     def api_get(path):
-        return json.loads(https.get(_API + path, auth))
+        return https.get_json(_API + path, auth)   # parsed as it arrives
 
     blobs = _API + '/repos/%s/%s/git/blobs/' % (cfg['user'], cfg['repository'])
     blob_headers = dict(auth)
@@ -344,8 +344,9 @@ def run_update(cfg, at_boot, abort=None, get_json=None, fetch=None, reset=machin
     between files, or after the last one, stops it before the install. After an install it calls reset(),
     so the box boots the new version on trial. It also resets when a
     failed install left its journal (its rollback failed too), so on_boot
-    finishes the rollback. get_json/fetch default to https.get with the
-    token from cfg (tests pass fakes).
+    finishes the rollback. get_json defaults to https.get_json and fetch
+    to https.get of the file's blob, both with the token from cfg (tests
+    pass fakes).
     """
     journal_before = recovery._exists(recovery.JOURNAL_PATH)
     try:
