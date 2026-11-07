@@ -1,32 +1,38 @@
-"""PortalBox OTA update helpers.
+"""PortalBox OTA: update the box from GitHub, plus config and backup helpers.
 
-Based on `ugit` by turfptax for the OpenMuscle project:
-https://github.com/turfptax/ugit
+run_update() picks the target version (net.ota_target), downloads and
+checks it (net.ota_stage), and installs it on trial (recovery.install).
+The caller connects WiFi first.
 
-This PortalBox adaptation provides GitHub-based firmware updates by syncing
-all repository files under `/src` (minus ignored/protected paths).
-Caller is responsible for establishing WiFi connection before initiating updates.
+backup()/restore() are based on `ugit` by turfptax for the OpenMuscle
+project: https://github.com/turfptax/ugit
 """
 
-import gc
 import os
 import time
 
 import ujson as json
 import ubinascii as binascii
 import uhashlib as hashlib
-import urequests
 import machine
 
-_GITHUB_API = 'https://api.github.com/repos'
-_GITHUB_RAW = 'https://raw.githubusercontent.com'
-_USER_AGENT = 'portalbox-ota'
+import recovery
+from net import https, ota_stage, ota_target
+from net.https import HttpError
+from net.ota_target import OtaError
+
+_API = 'https://api.github.com'
+_RAW = 'https://raw.githubusercontent.com/%s/%s/%s/'
 _CONFIG_PATH = '/config/ota_config.json'
 _OTA_STATE_PATH = '/config/ota_state.json'
-_OTA_INTERVAL_SECONDS = 24 * 60 * 60
-_MIN_VALID_EPOCH = 1700000000
+_OTA_INTERVAL_SECONDS = 24 * 60 * 60   # wait after a good check
+_RETRY_AFTER_FAIL_S = 60 * 60          # wait after a failed one
+IDLE_BEFORE_UPDATE_MS = 600000         # idle this long before an idle check
+CHECK_EVERY_S = 60                     # how often the app asks due()
+# 2023-11-14 on the board's own epoch (2000 on this port, not 1970).
+_MIN_VALID_EPOCH = time.mktime((2023, 11, 14, 0, 0, 0, 0, 0))
 _PROTECTED_PATHS = [
-    # Protect device-local and runtime paths so OTA cannot wipe secrets
+    # backup()/restore() leave device-local and runtime paths alone
     _CONFIG_PATH,
     '/config/wifi_config.json',
     '/ota.backup',
@@ -36,14 +42,6 @@ _PROTECTED_PATHS = [
     '/config',
     '/ca-cert.pem',
 ]
-
-
-def _headers(token=''):
-    """Build request headers for GitHub API calls."""
-    headers = {'User-Agent': _USER_AGENT}
-    if token:
-        headers['authorization'] = 'bearer %s' % token
-    return headers
 
 
 def _git_blob_hash(data):
@@ -113,18 +111,6 @@ def _file_size(filepath):
         return 0
 
 
-def _is_usb_cdc():
-    """Detect boards that should avoid automatic resets."""
-    try:
-        machine_str = os.uname().machine.upper()
-        for chip in ('ESP32S3', 'ESP32S2', 'ESP32C6', 'ESP32C3', 'ESP32H2'):
-            if chip in machine_str:
-                return True
-    except Exception:
-        pass
-    return False
-
-
 def _is_ignored(path, ignore):
     """Return True if `path` matches any ignore entry."""
     for entry in ignore:
@@ -132,51 +118,6 @@ def _is_ignored(path, ignore):
         if path == normalized or path.startswith(normalized + '/'):
             return True
     return False
-
-
-def _index_git_tree(git_tree):
-    """Index the Git tree by absolute path for quick lookups."""
-    indexed = {}
-    for item in git_tree['tree']:
-        path = item['path']
-        if not path.startswith('/'):
-            path = '/' + path
-        indexed[path] = item
-    return indexed
-
-
-def _src_paths_from_git_index(git_index):
-    """Return sorted absolute paths for blob files under `/src` in the repo."""
-    src_paths = []
-    for path, item in git_index.items():
-        if item.get('type') == 'blob' and path.startswith('/src/'):
-            src_paths.append(path)
-    src_paths.sort()
-    return src_paths
-
-
-def _device_path_from_repo_path(repo_path):
-    """Strip /src/ prefix to map repo paths to device deployment paths."""
-    if repo_path.startswith('/src/'):
-        return '/' + repo_path[5:]
-    return repo_path
-
-
-def _repo_download_size(manifest_paths, git_index, local_tree, ignore):
-    """Estimate bytes that must be downloaded for the manifest files."""
-    download = 0
-    for path in manifest_paths:
-        if _is_ignored(path, ignore):
-            continue
-        item = git_index.get(path)
-        if not item or item['type'] != 'blob':
-            continue
-        git_sha = item.get('sha', '')
-        device_path = _device_path_from_repo_path(path)
-        local_sha = local_tree.get(device_path, '')
-        if not (git_sha and local_sha and git_sha == local_sha):
-            download += item.get('size', 0)
-    return download
 
 
 def _fmt_size(size_bytes):
@@ -224,12 +165,6 @@ def _ensure_config_dir():
         pass
 
 
-def _require_connected(isconnected):
-    """Require caller-managed WiFi connectivity before OTA operations."""
-    if not isconnected:
-        raise RuntimeError('WiFi must be connected first. Call with isconnected=True.')
-
-
 def _load_config():
     """Load the OTA config JSON from the device."""
     try:
@@ -239,15 +174,23 @@ def _load_config():
         return {}
 
 
-def _resolve_config(user=None, repository=None, branch=None, token=None, ignore=None):
-    """Merge explicit arguments with stored OTA config values."""
-    config = _load_config()
+def load_config(path=_CONFIG_PATH):
+    """Return the OTA config with defaults. OTA is off unless `enabled` is true."""
+    try:
+        with open(path, 'r') as file_handle:
+            stored = json.loads(file_handle.read())
+        if not isinstance(stored, dict):
+            stored = {}
+    except Exception:
+        stored = {}
     return {
-        'user': user or config.get('user', ''),
-        'repository': repository or config.get('repository', ''),
-        'branch': branch or config.get('branch', 'main'),
-        'token': token if token is not None else config.get('token', ''),
-        'ignore': ignore if ignore is not None else config.get('ignore', []),
+        'user': stored.get('user', ''),
+        'repository': stored.get('repository', ''),
+        'branch': stored.get('branch', 'main'),
+        'token': stored.get('token', ''),
+        'ignore': stored.get('ignore', []),
+        'enabled': stored.get('enabled') is True,
+        'mode': stored.get('mode', 'release'),
     }
 
 
@@ -273,59 +216,154 @@ def _save_ota_state(state, state_path=_OTA_STATE_PATH):
         print('[OTA] Warning: failed to save OTA state: %s' % error)
 
 
-def _should_run_daily_ota(now_epoch, state):
-    """Return True when the stored OTA timestamp is stale or unavailable."""
-    if now_epoch < _MIN_VALID_EPOCH:
-        print('[OTA] Clock not synchronized yet; running OTA this boot.')
-        return True
-
-    last_run = state.get('last_success_epoch', 0)
-    if not isinstance(last_run, int):
-        return True
-    return (now_epoch - last_run) >= _OTA_INTERVAL_SECONDS
+def _since(now, state, key):
+    last = state.get(key, 0)
+    return now - last if isinstance(last, int) else _OTA_INTERVAL_SECONDS
 
 
-def run_daily_update_if_due(user=None, repository=None, branch=None, token=None,
-                            ignore=None, isconnected=False, reset_after=False,
-                            state_path=_OTA_STATE_PATH):
-    """Run OTA once per day, using a persisted timestamp gate."""
-    config = _resolve_config(user, repository, branch, token, ignore)
-    ignore = _ensure_ignore(config['ignore'])
+def due(now, state, at_boot, idle_ms, clock_ok):
+    """True when it is time to check for an update.
 
-    if not config['user'] or not config['repository']:
-        print('OTA config incomplete. Run ota.create_config() first.')
-        return None
+    Never with the clock unset; a day after a good check, an hour after
+    a failed one; then at boot, or once the box has been idle 10 min.
+    """
+    if not clock_ok:
+        print('[OTA] clock not set')
+        return False
+    if _since(now, state, 'last_success_epoch') < _OTA_INTERVAL_SECONDS:
+        return False
+    if _since(now, state, 'last_try_epoch') < _RETRY_AFTER_FAIL_S:
+        return False
+    return at_boot or idle_ms >= IDLE_BEFORE_UPDATE_MS
 
-    if not isconnected:
-        print('WiFi must be connected before OTA can run.')
-        return None
 
+def run_if_due(cfg, at_boot, idle_ms=0, abort=None, now=None, run=None,
+               state_path=None):
+    """run_update() when OTA is on, not in dev mode, and due().
+
+    Returns 'off', 'dev mode', 'not due', or run_update()'s result. The
+    try time is saved before the run (an install resets the box inside
+    it); the success time after any result but 'failed: ...'.
+    """
+    if cfg.get('enabled') is not True:
+        return 'off'
+    if recovery.dev_mode():
+        return 'dev mode'
+    now = time.time() if now is None else now
+    state_path = state_path or _OTA_STATE_PATH
     state = _load_ota_state(state_path)
-    now_epoch = int(time.time())
-
-    if not _should_run_daily_ota(now_epoch, state):
-        next_run = state.get('last_success_epoch', 0) + _OTA_INTERVAL_SECONDS
-        print('[OTA] Not due yet. Next run after epoch: %d' % next_run)
-        return None
-
-    print('[OTA] Running daily update check...')
-    try:
-        log = pull_all(
-            user=config['user'], repository=config['repository'],
-            branch=config['branch'], token=config['token'],
-            ignore=ignore, isconnected=True, reset_after=reset_after,
-        )
-        state['last_success_epoch'] = int(time.time())
+    if not due(now, state, at_boot, idle_ms, now >= _MIN_VALID_EPOCH):
+        return 'not due'
+    state['last_try_epoch'] = now
+    _save_ota_state(state, state_path)
+    result = (run or run_update)(cfg, at_boot, abort=abort)
+    if not result.startswith('failed'):
+        state['last_success_epoch'] = now
         _save_ota_state(state, state_path)
-        print('[OTA] Update completed. Timestamp saved.')
-        return log
-    except Exception as error:
-        print('[OTA] Daily update failed: %s' % error)
-        return None
+    return result
 
 
-def create_config(user='', repository='', branch='main', token='', ignore=None):
-    """Write the OTA config file to `/config/ota_config.json`."""
+def _reason(e):
+    """Short text for a failure, for the result and the log."""
+    if isinstance(e, HttpError):
+        msg = e.args[1] if len(e.args) > 1 else ''
+        return ('http %d %s' % (e.status, msg)).rstrip()
+    if isinstance(e, OtaError):
+        return str(e)
+    return ('%s %s' % (type(e).__name__, e)).rstrip()
+
+
+def _local_hashes(tree):
+    """Git blob sha of each box file the target tree also has."""
+    local = {}
+    for e in tree:
+        if e['type'] == 'blob':
+            sha = ota_stage.file_sha(recovery.LIVE_ROOT + '/' + e['path'])
+            if sha:
+                local[e['path']] = sha
+            recovery.feed()
+    return local
+
+
+def _update(cfg, abort, get_json, fetch):
+    if cfg.get('enabled') is not True:
+        return 'off'
+    state = recovery.load_state()
+    if state['trial']:
+        return 'failed: trial active'   # install() would refuse after the download
+    auth = {'Authorization': 'Bearer ' + cfg['token']} if cfg.get('token') else {}
+
+    def api_get(path):
+        return json.loads(https.get(_API + path, auth))
+
+    def raw_get(url, sink):
+        return https.get(url, auth, sink=sink)
+
+    get_json = get_json or api_get
+    fetch = fetch or raw_get
+
+    target = ota_target.resolve_target(cfg, get_json)
+    commit = target['commit']
+    if commit in state['bad']:
+        return 'bad version'
+    if commit == state['version']:
+        return 'up to date'
+    tree = target['tree']
+    plan = ota_target.build_plan(tree, _local_hashes(tree), state['managed'],
+                                 cfg.get('ignore', []))
+    if not plan['files'] and not plan['deletes']:
+        # Same files (a docs-only commit, or a box set up by cable):
+        # adopt the version without a trial or a reset.
+        state['version'] = commit
+        state['managed'] = plan['managed']
+        recovery.save_state(state)
+        return 'up to date'
+    # The commit sha in the URL pins every file to the same version.
+    raw = _RAW % (cfg['user'], cfg['repository'], commit)
+    ota_stage.stage(plan, tree, raw, fetch, abort)
+    # stage() checks only before each file: a card tapped during the
+    # last download must stop the install and its reset too.
+    if abort and abort():
+        raise OtaError('aborted')
+    recovery.install(commit, [p for p, _, _ in plan['files']], plan['deletes'],
+                     plan['managed'])
+    return 'installed ' + commit
+
+
+def run_update(cfg, at_boot, abort=None, get_json=None, fetch=None, reset=machine.reset):
+    """Update the box to the version `cfg` asks for. Never raises.
+
+    Returns 'off', 'up to date', 'bad version', 'installed <commit>' or
+    'failed: <why>', and logs it with 'boot' or 'idle'. abort() true
+    between files, or after the last one, stops it before the install. After an install it calls reset(),
+    so the box boots the new version on trial. It also resets when a
+    failed install left its journal (its rollback failed too), so on_boot
+    finishes the rollback. get_json/fetch default to https.get with the
+    token from cfg (tests pass fakes).
+    """
+    journal_before = recovery._exists(recovery.JOURNAL_PATH)
+    try:
+        result = _update(cfg, abort, get_json, fetch)
+    except Exception as e:
+        result = 'failed: ' + _reason(e)
+        try:
+            recovery._rm_tree(recovery.STAGE_DIR)
+        except Exception:
+            pass
+    left_journal = not journal_before and recovery._exists(recovery.JOURNAL_PATH)
+    recovery.log('ota', '%s %s' % ('boot' if at_boot else 'idle', result))
+    if result.startswith('installed ') or left_journal:
+        reset()
+    return result
+
+
+def create_config(user='', repository='', branch='main', token='', ignore=None,
+                  enabled=False, mode='release'):
+    """Write the OTA config file to `/config/ota_config.json`.
+
+    mode 'release' follows the latest GitHub release; 'branch' follows
+    the tip of `branch`. OTA stays off until `enabled` is True.
+    """
     if ignore is None:
         ignore = []
 
@@ -336,6 +374,8 @@ def create_config(user='', repository='', branch='main', token='', ignore=None):
         'branch': branch,
         'token': token,
         'ignore': ignore,
+        'enabled': enabled,
+        'mode': mode,
     }
 
     with open(_CONFIG_PATH, 'w') as file_handle:
@@ -359,243 +399,6 @@ def show_config():
             print('  %s: %s' % (key, value[:3] + '*' * max(len(value) - 3, 0)))
         else:
             print('  %s: %s' % (key, value))
-
-
-def pull_git_tree(user, repository, branch='main', token=''):
-    """Fetch the recursive Git tree for the requested repository branch."""
-    if urequests is None:
-        raise RuntimeError('urequests is unavailable')
-
-    url = '%s/%s/%s/git/trees/%s?recursive=1' % (_GITHUB_API, user, repository, branch)
-    response = urequests.get(url, headers=_headers(token))
-    data = json.loads(response.content.decode('utf-8'))
-    response.close()
-
-    if 'tree' not in data:
-        raise Exception('Branch "%s" not found for %s/%s' % (branch, user, repository))
-    return data
-
-
-def pull(filepath, raw_url, token=''):
-    """Download a file from GitHub and write it to the device."""
-    if urequests is None:
-        raise RuntimeError('urequests is unavailable')
-
-    response = urequests.get(raw_url, headers=_headers(token))
-    try:
-        parts = filepath.split('/')
-        for index in range(1, len(parts)):
-            directory = '/'.join(parts[:index])
-            if directory:
-                try:
-                    os.mkdir(directory)
-                except Exception:
-                    pass
-
-        # Stream response body in small chunks to avoid large memory allocations
-        with open(filepath, 'wb') as file_handle:
-            reader = getattr(response, 'raw', None)
-            if reader is not None:
-                while True:
-                    chunk = reader.read(1024)
-                    if not chunk:
-                        break
-                    file_handle.write(chunk)
-                    gc.collect()
-            else:
-                # Fallback: some urequests implementations only expose .content
-                data = response.content
-                file_handle.write(data)
-                del data
-                gc.collect()
-    finally:
-        try:
-            response.close()
-        except Exception:
-            pass
-
-    return None
-
-
-def pull_all(user=None, repository=None, branch=None, token=None,
-             ssid=None, password=None, ignore=None,
-             isconnected=False, reset_after=False):
-    """Sync the device to all repository blob files under `/src`."""
-    config = _resolve_config(user, repository, branch, token, ignore)
-    ignore = _ensure_ignore(config['ignore'])
-
-    if not config['user'] or not config['repository']:
-        raise ValueError('user and repository required. Pass them or run ota.create_config()')
-
-    _require_connected(isconnected)
-
-    os.chdir('/')
-
-    print('Fetching repository tree...')
-    git_tree = pull_git_tree(
-        config['user'],
-        config['repository'],
-        config['branch'],
-        config['token'],
-    )
-    git_index = _index_git_tree(git_tree)
-    manifest_paths = _src_paths_from_git_index(git_index)
-    print('Targeting %d files under /src' % len(manifest_paths))
-
-    print('Scanning local files...')
-    local_tree = _build_internal_tree()
-
-    device_manifest_paths = [_device_path_from_repo_path(p) for p in manifest_paths]
-    device_manifest_set = set(device_manifest_paths)
-
-    log = []
-    updated = 0
-    skipped = 0
-    deleted = 0
-
-    gc.collect()
-
-    for path in manifest_paths:
-        if _is_ignored(path, ignore):
-            skipped += 1
-            continue
-
-        item = git_index.get(path)
-        if not item:
-            log.append(path + ' missing from git tree')
-            continue
-
-        if item['type'] != 'blob':
-            continue
-
-        git_sha = item.get('sha', '')
-        device_path = _device_path_from_repo_path(path)
-        local_sha = local_tree.get(device_path, '')
-        if git_sha and local_sha and git_sha == local_sha:
-            skipped += 1
-            log.append(path + ' unchanged')
-            continue
-
-        try:
-            raw_base = '%s/%s/%s/%s/' % (
-                _GITHUB_RAW,
-                config['user'],
-                config['repository'],
-                config['branch'],
-            )
-            device_path = _device_path_from_repo_path(path)
-            pull(device_path, raw_base + item['path'], config['token'])
-            updated += 1
-            log.append(device_path + ' updated')
-            print('  updated:', device_path)
-            gc.collect()
-        except Exception as error:
-            log.append(path + ' FAILED: ' + str(error))
-            print('  FAILED:', path, error)
-
-    for local_path in local_tree:
-        if local_path not in device_manifest_set and not _is_ignored(local_path, ignore):
-            try:
-                os.remove(local_path)
-                deleted += 1
-                log.append(local_path + ' deleted')
-                print('  deleted:', local_path)
-            except Exception:
-                log.append(local_path + ' delete failed')
-
-    summary = 'ota: %d updated, %d skipped, %d deleted' % (updated, skipped, deleted)
-    print(summary)
-    log.insert(0, summary)
-
-    try:
-        with open('/ota_log.txt', 'w') as file_handle:
-            file_handle.write('\n'.join(log))
-    except Exception:
-        pass
-
-    if reset_after:
-        if _is_usb_cdc():
-            print('WARNING: USB-CDC board detected (%s).' % os.uname().machine)
-            print('machine.reset() skipped — reset manually or power-cycle.')
-            print('Auto-reset can brick USB-CDC boards if boot.py/main.py crashes.')
-        else:
-            print('Resetting device in 5 seconds...')
-            time.sleep(5)
-            if machine is not None:
-                machine.reset()
-
-    return log
-
-
-def check_for_updates(user=None, repository=None, branch=None, token=None,
-                      ignore=None, isconnected=False,
-                      ssid=None, password=None):
-    """Return new, changed, and deleted files for repo blobs under `/src`."""
-    config = _resolve_config(user, repository, branch, token, ignore)
-    ignore = _ensure_ignore(config['ignore'])
-
-    if not config['user'] or not config['repository']:
-        raise ValueError('user and repository required. Pass them or run ota.create_config()')
-
-    _require_connected(isconnected)
-
-    os.chdir('/')
-    git_tree = pull_git_tree(
-        config['user'],
-        config['repository'],
-        config['branch'],
-        config['token'],
-    )
-    git_index = _index_git_tree(git_tree)
-    manifest_paths = _src_paths_from_git_index(git_index)
-    local_tree = _build_internal_tree()
-    device_manifest_paths = [_device_path_from_repo_path(p) for p in manifest_paths]
-    device_manifest_set = set(device_manifest_paths)
-
-    new = []
-    changed = []
-    deleted = []
-
-    for path in manifest_paths:
-        if _is_ignored(path, ignore):
-            continue
-
-        item = git_index.get(path)
-        if not item or item['type'] != 'blob':
-            continue
-
-        device_path = _device_path_from_repo_path(path)
-        local_sha = local_tree.get(device_path, '')
-        if not local_sha:
-            new.append(path)
-        elif item.get('sha', '') != local_sha:
-            changed.append(path)
-
-    for local_path in local_tree:
-        if local_path not in device_manifest_set and not _is_ignored(local_path, ignore):
-            deleted.append(local_path)
-
-    return {'new': new, 'changed': changed, 'deleted': deleted}
-
-
-def update(branch=None, token=None):
-    """Replace this module file with the latest version from GitHub."""
-    if token is None:
-        token = _load_config().get('token', '')
-    if branch is None:
-        branch = 'main'
-
-    try:
-        dest = __file__
-    except Exception:
-        dest = '/ota.py'
-
-    raw_url = '%s/ACherniske/portalbox-firmware/%s/src/net/ota.py' % (
-        _GITHUB_RAW,
-        branch,
-    )
-    pull(dest, raw_url, token)
-    print('ota updated at %s from branch %s. Reset device to use new version.' % (dest, branch))
 
 
 def backup(ignore=None):
@@ -716,81 +519,3 @@ def _restore_file(filepath, content):
     print('  restored:', filepath)
 
 
-def safe_pull_all(user=None, repository=None, branch=None, token=None,
-                  ssid=None, password=None, ignore=None,
-                  isconnected=False, reset_after=False):
-    """Back up first, then run `pull_all()` if storage is sufficient."""
-    config = _resolve_config(user, repository, branch, token, ignore)
-    ignore = _ensure_ignore(config['ignore'])
-
-    if not config['user'] or not config['repository']:
-        raise ValueError('user and repository required. Pass them or run ota.create_config()')
-
-    _require_connected(isconnected)
-
-    os.chdir('/')
-
-    print('Pre-flight check...')
-    total, free, used = _get_storage_info()
-    print('  Storage: %s free of %s' % (_fmt_size(free), _fmt_size(total)))
-
-    git_tree = pull_git_tree(
-        config['user'],
-        config['repository'],
-        config['branch'],
-        config['token'],
-    )
-    git_index = _index_git_tree(git_tree)
-    manifest_paths = _src_paths_from_git_index(git_index)
-    local_tree = _build_internal_tree()
-
-    download_size = _repo_download_size(manifest_paths, git_index, local_tree, ignore)
-
-    backup_size = 0
-    for path in local_tree:
-        if not _is_ignored(path, ignore):
-            backup_size += _file_size(path) + len(path) + 80
-
-    needed = backup_size + download_size + 4096
-    print('  Backup estimate: %s' % _fmt_size(backup_size))
-    print('  Download estimate: %s' % _fmt_size(download_size))
-    print('  Total needed: %s' % _fmt_size(needed))
-
-    if needed > free:
-        shortfall = needed - free
-        print('\nNot enough space! Short by %s.' % _fmt_size(shortfall))
-        print('Free up space or use pull_all() without backup.')
-        return None
-
-    print('\nCreating backup...')
-    result = backup(ignore)
-    if result == -1:
-        print('Backup failed. Aborting safe update.')
-        return None
-
-    print('\nStarting update...')
-    try:
-        log = pull_all(
-            user=config['user'], repository=config['repository'],
-            branch=config['branch'], token=config['token'],
-            ignore=ignore, isconnected=True, reset_after=False,
-        )
-    except Exception as error:
-        print('\nUpdate FAILED: %s' % str(error))
-        print('Your backup is at /ota.backup')
-        print('Run ota.restore() to roll back.')
-        return None
-
-    print('\nUpdate complete with backup at /ota.backup')
-    if reset_after:
-        if _is_usb_cdc():
-            print('WARNING: USB-CDC board detected (%s).' % os.uname().machine)
-            print('machine.reset() skipped — reset manually or power-cycle.')
-            print('Auto-reset can brick USB-CDC boards if boot.py/main.py crashes.')
-        else:
-            print('Resetting device in 5 seconds...')
-            time.sleep(5)
-            if machine is not None:
-                machine.reset()
-
-    return log

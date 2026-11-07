@@ -10,11 +10,15 @@ RELAY_USB_PIN = const(9)
 # Buzzer Pin
 BUZZER_PIN = const(4)
 
+# Button Pin
+BUTTON_PIN = const(1)
+
 # SPI Bus 1 (RFID)
 SPI_ID = const(1)
 SPI_SCK = const(38)
 SPI_MOSI = const(37)
 SPI_MISO = const(36)
+SPI_BAUDRATE = const(1000000)
 
 # RFID Pins
 RFID_CS = const(2)

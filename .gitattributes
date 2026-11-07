@@ -1,0 +1,2 @@
+# Box files must match git byte for byte: OTA compares git blob hashes.
+src/** text=auto eol=lf

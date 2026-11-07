@@ -15,6 +15,9 @@ def configure_wifi_psk(ssid, psk, bssid=None, wpa3=False):
     c.save()
 
 def configure_wifi_enterprise(ssid, username, password, identity=None, eap='PEAP', ca='ca-cert.pem'):
+    if identity is None:
+        identity = username
+
     c = WiFiConfig()
     if eap == 'PEAP':
         c.set_eap_peap(ssid, username, password, identity=identity, ca_cert_file=ca)

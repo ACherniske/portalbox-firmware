@@ -1,7 +1,6 @@
 """LED control module with async animations."""
 
 import uasyncio as asyncio
-from micropython import const
 
 
 # Color constants (RGB format)
@@ -11,7 +10,7 @@ COLORS = {
     'GREEN': (0, 255, 0),
     'BLUE': (0, 0, 255),
     'WHITE': (255, 255, 255),
-    'ORANGE': (255, 165, 0),
+    'ORANGE': (255, 115, 0),
     'YELLOW': (255, 255, 0),
     'PURPLE': (128, 0, 128),
     'CYAN': (0, 255, 255),
@@ -39,6 +38,7 @@ class LEDController:
             driver: LED driver instance (Dotstar, NeoPixel, etc.)
         """
         self.driver = driver
+        print(f"[LED] Initialized with driver: {type(driver).__name__}")
 
         # Handle different attribute names
         if hasattr(driver, 'num_leds'):
@@ -59,29 +59,18 @@ class LEDController:
 
     @brightness.setter
     def brightness(self, value):
-        """Set brightness if driver supports it.
+        """Set brightness on the active driver.
 
-        Convert and clamp the value according to the active driver:
-        - DotStar (driver exposes `num_leds`): expects integer 0-31.
-        - NeoPixel wrapper (exposes `num_pixels`): accepts float 0.0-1.0 or int 0-31.
+        Both supported drivers expose a `brightness` property. DotStar uses
+        integer 0-31 brightness; NeoPixel wrapper also accepts integer 0-31.
         """
-        if hasattr(self.driver, 'brightness'):
-            # DotStar uses `num_leds`; prefer integer 0-31 for that driver.
-            if hasattr(self.driver, 'num_leds'):
-                if isinstance(value, float):
-                    v = int(max(0.0, min(1.0, value)) * 31)
-                else:
-                    v = max(0, min(31, int(value)))
-                self.driver.brightness = v
-            else:
-                # Other drivers (e.g. neopixel_wrapper) accept float 0.0-1.0
-                if isinstance(value, float):
-                    v = max(0.0, min(1.0, value))
-                else:
-                    v = max(0, min(31, int(value)))
-                self.driver.brightness = v
-        elif hasattr(self.driver, 'set_brightness'):
-            self.driver.set_brightness(value)
+        if isinstance(value, float):
+            # Normalize float values into DotStar-style range.
+            value = int(max(0.0, min(1.0, value)) * 31)
+        else:
+            value = max(0, min(31, int(value)))
+
+        self.driver.brightness = value
 
     def _normalize_color(self, color):
         """
@@ -100,67 +89,18 @@ class LEDController:
         return color
 
     def _fill_driver(self, color):
-        """
-        Fill all LEDs using driver's fill method.
-
-        Handles different driver interfaces.
-
-        Args:
-            color: RGB tuple
-        """
+        """Fill all LEDs using the driver fill method."""
         r, g, b = color
-
-        # Try different fill method signatures
-        if hasattr(self.driver, 'fill'):
-            try:
-                # Try (r, g, b) signature
-                self.driver.fill(r, g, b)
-            except TypeError:
-                try:
-                    # Try color tuple signature
-                    self.driver.fill(color)
-                except Exception:
-                    # Fallback to manual fill
-                    self._manual_fill(color)
-        else:
-            self._manual_fill(color)
-
-    def _manual_fill(self, color):
-        """Manually fill all pixels."""
-        for i in range(self.num_leds):
-            self._set_pixel_driver(i, color)
+        self.driver.fill(r, g, b)
 
     def _set_pixel_driver(self, index, color):
-        """
-        Set pixel using driver's method.
-
-        Handles different driver interfaces.
-
-        Args:
-            index: LED index
-            color: RGB tuple
-        """
+        """Set pixel using the driver set_pixel method."""
         r, g, b = color
-
-        if hasattr(self.driver, 'set_pixel'):
-            try:
-                # Try (index, r, g, b) signature
-                self.driver.set_pixel(index, r, g, b)
-            except TypeError:
-                try:
-                    # Try (index, color) signature
-                    self.driver.set_pixel(index, color)
-                except Exception:
-                    pass
-        elif hasattr(self.driver, 'set_pixel_color'):
-            self.driver.set_pixel_color(index, color)
+        self.driver.set_pixel(index, r, g, b)
 
     def _show(self):
         """Update LED display."""
-        if hasattr(self.driver, 'show'):
-            self.driver.show()
-        elif hasattr(self.driver, 'write'):
-            self.driver.write()
+        self.driver.show()
 
     def stop(self):
         """Stop current animation."""
