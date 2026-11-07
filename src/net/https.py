@@ -51,6 +51,7 @@ def _request(host, path, headers):
     ctx.verify_mode = tls.CERT_REQUIRED
     ctx.load_verify_locations(_roots())
     addr = socket.getaddrinfo(name, port)[0][-1]
+    recovery.feed()   # DNS, then connect, each can be slow
     sock = socket.socket()
     try:
         sock.settimeout(TIMEOUT_S)
@@ -79,6 +80,7 @@ def _request(host, path, headers):
                 break
             key, _, value = line.decode().partition(':')
             reply[key.strip().lower()] = value.strip()
+        recovery.feed()   # head lines, then the first body read, each can be slow
     except Exception:
         stream.close()
         raise

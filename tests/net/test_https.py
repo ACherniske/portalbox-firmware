@@ -125,6 +125,75 @@ class FakeNet:
         return all(s.closed for s in self.streams)
 
 
+class _FakeSocketModule:
+    """Stands in for socket, tls and the TLS stream in https._request,
+    recording each step (and each feed) in order."""
+    PROTOCOL_TLS_CLIENT = 0
+    CERT_REQUIRED = 2
+
+    def __init__(self, head):
+        self.events = []
+        self.head = list(head)
+        self.verify_mode = None
+
+    # socket
+    def getaddrinfo(self, name, port):
+        self.events.append('dns')
+        return [(2, 1, 0, '', ('10.0.0.1', port))]
+
+    def socket(self):
+        return self
+
+    def settimeout(self, s):
+        pass
+
+    def connect(self, addr):
+        self.events.append('connect')
+
+    # tls
+    def SSLContext(self, protocol):
+        return self
+
+    def load_verify_locations(self, data):
+        pass
+
+    def wrap_socket(self, sock, server_hostname=None):
+        self.events.append('handshake')
+        return self
+
+    # stream
+    def write(self, data):
+        self.events.append('write')
+        return len(data)
+
+    def readline(self):
+        self.events.append('head')
+        return self.head.pop(0) if self.head else b''
+
+    def close(self):
+        self.events.append('close')
+
+
+def test_feeds_after_dns_and_head():
+    """DNS + connect, and head lines + the first body read, can each take
+    up to TIMEOUT_S: feed after DNS and after the reply head too."""
+    fake = _FakeSocketModule([b'HTTP/1.0 200 OK\r\n', b'Content-Length: 2\r\n', b'\r\n'])
+    saved = (https.socket, https.tls, https._roots, recovery.feed)
+    https.socket = https.tls = fake
+    https._roots = lambda: b''
+    recovery.feed = lambda: fake.events.append('feed')
+    try:
+        status, reply, stream = https._request('example.com', '/x', {})
+    finally:
+        https.socket, https.tls, https._roots, recovery.feed = saved
+    ev = fake.events
+    assert status == 200 and reply == {'content-length': '2'}, "reply %r %r" % (status, reply)
+    dns, connect = ev.index('dns'), ev.index('connect')
+    assert 'feed' in ev[dns + 1:connect], "no feed between DNS and connect: %r" % ev
+    last_head = len(ev) - 1 - ev[::-1].index('head')
+    assert 'feed' in ev[last_head + 1:], "no feed after the reply head: %r" % ev
+
+
 def _with_fake(responses, fn):
     real = https._request
     fake = FakeNet(responses)
@@ -340,6 +409,7 @@ def run():
     runner.run_test("No Content-Length reads to the end", test_no_length_reads_to_end)
     runner.run_test("Over max_bytes without length", test_over_max_without_length)
     runner.run_test("Non-200 is an error", test_non_200_is_error)
+    runner.run_test("Feeds after DNS and after the reply head", test_feeds_after_dns_and_head)
     runner.run_test("GitHub API over verified TLS", test_api_over_verified_tls)
     runner.run_test("Raw file matches its blob hash", test_raw_file_matches_blob_hash)
     runner.run_test("Self-signed server refused", test_self_signed_refused)
