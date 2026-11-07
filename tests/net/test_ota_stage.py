@@ -136,11 +136,14 @@ class _FakeFetch:
     """Serves target files by path in 100-byte chunks, like fetch(path, sha,
     sink) over https.get. short: drop the last 3 bytes; wrong: change the
     last byte; long: add 2000 bytes; error: raise it (mid=True: after
-    writing the first chunk). asked: paths in request order; shas: the sha
-    each path was asked for; written: bytes the sink took, per path."""
+    writing the first chunk). fail: {path: [errors]}, raised one per
+    request for that path after its first chunk (a dropped download).
+    asked: paths in request order; shas: the sha each path was asked for;
+    written: bytes the sink took, per path."""
 
-    def __init__(self, files, short=(), wrong=(), long=(), error=None, mid=False):
+    def __init__(self, files, short=(), wrong=(), long=(), error=None, mid=False, fail=None):
         self.bodies = {p: t.encode() for p, t in files.items()}
+        self.fail = dict((p, list(e)) for p, e in (fail or {}).items())
         self.asked = []
         self.shas = {}
         self.short = short
@@ -175,6 +178,8 @@ class _FakeFetch:
             self.written[path] = self.written.get(path, 0) + len(body[i:i + 100])
             if self.error:
                 raise self.error
+            if self.fail.get(path):
+                raise self.fail[path].pop(0)
         return len(body)
 
     def paths(self):
@@ -307,6 +312,56 @@ def run():
         assert str(e) == 'aborted', "error %r" % str(e)
         assert len(fetch.asked) == 1, "fetched %r after abort" % fetch.asked
         assert_no_stage("abort")
+
+    # --- per-file retry: one more try after a dropped download ---
+
+    def test_dropped_download_retried():
+        fetch = _FakeFetch(_v2(), fail={'core/main.py': [OSError(116)]})
+        stage(_v2(), fetch)
+        assert fetch.asked.count('core/main.py') == 2, "asked %r" % fetch.asked
+        got = _read(recovery.STAGE_DIR + '/core/main.py')
+        assert got == _v2()['core/main.py'], "staged %r" % (got or '')[:40]
+
+    def test_server_error_retried():
+        fetch = _FakeFetch(_v2(), fail={'net/new.py': [HttpError(504)]})
+        stage(_v2(), fetch)
+        assert fetch.asked.count('net/new.py') == 2, "asked %r" % fetch.asked
+
+    def test_broken_body_retried():
+        fetch = _FakeFetch(_v2(), fail={'net/new.py': [HttpError(0, 'short read')]})
+        stage(_v2(), fetch)
+        assert fetch.asked.count('net/new.py') == 2, "asked %r" % fetch.asked
+
+    def test_second_drop_gives_up():
+        fetch = _FakeFetch(_v2(), fail={'core/main.py': [OSError(116), OSError(116)]})
+        _raises(lambda: stage(_v2(), fetch), OSError)
+        assert fetch.asked.count('core/main.py') == 2, "asked %r" % fetch.asked
+        assert_no_stage("second drop")
+        assert_v1_live("second drop")
+
+    def test_not_found_not_retried():
+        fetch = _FakeFetch(_v2(), fail={'net/new.py': [HttpError(404)]})
+        _raises(lambda: stage(_v2(), fetch), HttpError)
+        assert fetch.asked.count('net/new.py') == 1, "asked %r" % fetch.asked
+
+    def test_out_of_memory_not_retried():
+        fetch = _FakeFetch(_v2(), fail={'core/main.py': [MemoryError()]})
+        _raises(lambda: stage(_v2(), fetch), MemoryError)
+        assert fetch.asked.count('core/main.py') == 1, "asked %r" % fetch.asked
+
+    def test_bad_hash_not_retried():
+        fetch = _FakeFetch(_v2(), wrong=('core/main.py',))
+        _raises(lambda: stage(_v2(), fetch))
+        assert fetch.asked.count('core/main.py') == 1, "asked %r" % fetch.asked
+
+    def test_abort_stops_retry():
+        fetch = _FakeFetch(_v2(), fail={'core/main.py': [OSError(116)]})
+
+        def abort():   # a card arrives while core/main.py downloads
+            return 'core/main.py' in fetch.asked
+        e = _raises(lambda: stage(_v2(), fetch, abort=abort))
+        assert str(e) == 'aborted', "error %r" % str(e)
+        assert fetch.asked.count('core/main.py') == 1, "retried after abort: %r" % fetch.asked
 
     def test_manifest_missing():
         target = _v2(extra=['src/net/gone.py'])
@@ -566,6 +621,14 @@ def run():
     runner.run_test("Bad manifest refused", fresh(test_bad_manifest))
     runner.run_test("Sink write error fails, stage removed", fresh(test_sink_error))
     runner.run_test("Abort between files", fresh(test_abort_between_files))
+    runner.run_test("Dropped download retried once", fresh(test_dropped_download_retried))
+    runner.run_test("Server error retried once", fresh(test_server_error_retried))
+    runner.run_test("Broken body retried once", fresh(test_broken_body_retried))
+    runner.run_test("Second drop gives up, stage removed", fresh(test_second_drop_gives_up))
+    runner.run_test("404 not retried", fresh(test_not_found_not_retried))
+    runner.run_test("MemoryError not retried", fresh(test_out_of_memory_not_retried))
+    runner.run_test("Bad hash not retried", fresh(test_bad_hash_not_retried))
+    runner.run_test("Abort stops a retry", fresh(test_abort_stops_retry))
     runner.run_test("Missing manifest entry refused", fresh(test_manifest_missing))
     runner.run_test("Unchanged manifest checked from live copy", fresh(test_unchanged_manifest_checked_live))
     runner.run_test("Good files staged and installed", fresh(test_run_installs))
