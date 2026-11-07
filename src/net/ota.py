@@ -321,6 +321,10 @@ def _update(cfg, abort, get_json, fetch):
     # The commit sha in the URL pins every file to the same version.
     raw = _RAW % (cfg['user'], cfg['repository'], commit)
     ota_stage.stage(plan, tree, raw, fetch, abort)
+    # stage() checks only before each file: a card tapped during the
+    # last download must stop the install and its reset too.
+    if abort and abort():
+        raise OtaError('aborted')
     recovery.install(commit, [p for p, _, _ in plan['files']], plan['deletes'],
                      plan['managed'])
     return 'installed ' + commit
@@ -331,7 +335,7 @@ def run_update(cfg, at_boot, abort=None, get_json=None, fetch=None, reset=machin
 
     Returns 'off', 'up to date', 'bad version', 'installed <commit>' or
     'failed: <why>', and logs it with 'boot' or 'idle'. abort() true
-    between files stops the download. After an install it calls reset(),
+    between files, or after the last one, stops it before the install. After an install it calls reset(),
     so the box boots the new version on trial. It also resets when a
     failed install left its journal (its rollback failed too), so on_boot
     finishes the rollback. get_json/fetch default to https.get with the

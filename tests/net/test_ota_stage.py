@@ -468,6 +468,20 @@ def run():
         assert state['trial'] is False, "trial started"
         assert fetch.urls == [] and reset.calls == 0, "downloaded or reset"
 
+    def test_abort_after_last_file():
+        """A card tapped during the last download: no install, no reset."""
+        reset = _Reset()
+        fetch = _FakeFetch(_v2())
+        got = run_update(fetch=fetch, reset=reset,
+                         abort=lambda: len(fetch.urls) >= len(CHANGED))
+        assert len(fetch.urls) == len(CHANGED), "fetched %r" % (fetch.paths(),)
+        assert got == 'failed: aborted', "result %r" % got
+        assert reset.calls == 0, "reset %d times" % reset.calls
+        assert_v1_live("abort after last file")
+        assert_no_stage("abort after last file")
+        state = recovery.load_state()
+        assert state['trial'] is False and state['version'] != C1, "state %r" % state
+
     def test_idle_logged():
         run_update(at_boot=False)
         assert _logged('ota idle installed ' + C1), "log %r" % _read(recovery.LOG_PATH)
@@ -499,6 +513,7 @@ def run():
     runner.run_test("Trial active refused before download", fresh(test_trial_active_refused))
     runner.run_test("No file changes saves the version", fresh(test_no_change_saves_version))
     runner.run_test("Idle run labelled in the log", fresh(test_idle_logged))
+    runner.run_test("Abort after the last file: no install", fresh(test_abort_after_last_file))
 
     # Leave the board as we found it.
     _rm_tree(ROOT)
