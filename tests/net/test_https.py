@@ -210,14 +210,15 @@ def test_feeds_after_dns_and_head():
     """DNS + connect, and head lines + the first body read, can each take
     up to TIMEOUT_S: feed after DNS and after the reply head too."""
     fake = _FakeSocketModule([b'HTTP/1.0 200 OK\r\n', b'Content-Length: 2\r\n', b'\r\n'])
-    saved = (https.socket, https.tls, https._roots, recovery.feed)
+    saved = (https.socket, https.tls, https._roots, recovery.feed, https._ctx)
     https.socket = https.tls = fake
     https._roots = lambda: b''
+    https._ctx = None   # a context cached by an earlier test is a real one
     recovery.feed = lambda: fake.events.append('feed')
     try:
         status, reply, stream = https._request('example.com', '/x', {})
     finally:
-        https.socket, https.tls, https._roots, recovery.feed = saved
+        https.socket, https.tls, https._roots, recovery.feed, https._ctx = saved
     ev = fake.events
     assert status == 200 and reply == {'content-length': '2'}, "reply %r %r" % (status, reply)
     dns, connect = ev.index('dns'), ev.index('connect')
@@ -492,6 +493,210 @@ def test_non_200_is_error():
     _with_fake([(500, {}, b'oops')], run)
 
 
+# --- keep-alive session (fake connections speaking raw HTTP) ---------------
+
+def _reply(status, body=b'', headers=None):
+    """Raw HTTP/1.1 reply bytes; Content-Length added unless headers say
+    otherwise (pass {'content-length': None} to leave it out)."""
+    hdrs = {'content-length': str(len(body))}
+    hdrs.update(headers or {})
+    head = 'HTTP/1.1 %d X\r\n' % status
+    for k, v in hdrs.items():
+        if v is not None:
+            head += '%s: %s\r\n' % (k, v)
+    return head.encode() + b'\r\n' + body
+
+
+class FakeConn:
+    """One TLS connection: serves `replies` (raw bytes) in order, one per
+    request written; after them, or after `close_after` replies, it reads
+    as closed by the server (b''). requests: (method line, headers)."""
+
+    def __init__(self, host, replies, close_after=None):
+        self.host = host
+        self.replies = list(replies)
+        self.close_after = close_after
+        self.requests = []
+        self.buf = io.BytesIO(b'')
+        self.closed = False
+
+    def write(self, data):
+        lines = data.decode().split('\r\n')
+        hdrs = {}
+        for line in lines[1:]:
+            if line:
+                k, _, v = line.partition(':')
+                hdrs[k.strip()] = v.strip()
+        self.requests.append((lines[0], hdrs))
+        served = len(self.requests) - 1
+        if self.replies and (self.close_after is None or served < self.close_after):
+            self.buf = io.BytesIO(self.replies.pop(0))
+        else:
+            self.buf = io.BytesIO(b'')
+        return len(data)
+
+    def readline(self):
+        return self.buf.readline()
+
+    def read(self, n):
+        return self.buf.read(n)
+
+    def close(self):
+        self.closed = True
+
+
+class FakeConnector:
+    """Stands in for https._connect: each call hands out the next FakeConn
+    from `conns` (lists of replies, or (replies, close_after))."""
+
+    def __init__(self, conns):
+        self.plan = list(conns)
+        self.made = []
+
+    def __call__(self, host):
+        spec = self.plan.pop(0)
+        replies, close_after = spec if isinstance(spec, tuple) else (spec, None)
+        conn = FakeConn(host, replies, close_after)
+        self.made.append(conn)
+        return conn
+
+
+def _with_session(conns, fn):
+    real = https._connect
+    fake = FakeConnector(conns)
+    https._connect = fake
+    s = https.Session()
+    try:
+        return fn(s, fake)
+    finally:
+        s.close()
+        https._connect = real
+
+
+def test_session_reuses_connection():
+    def run(s, fake):
+        assert s.get('https://a.example/1') == b'one'
+        assert s.get_json('https://a.example/2') == {'n': 2}
+        sink = CountingSink(5)
+        assert s.get('https://a.example/3', sink=sink) == 5
+        assert len(fake.made) == 1, '%d connections' % len(fake.made)
+        lines = [r[0] for r in fake.made[0].requests]
+        assert lines == ['GET /1 HTTP/1.1', 'GET /2 HTTP/1.1', 'GET /3 HTTP/1.1'], lines
+    _with_session([[_reply(200, b'one'), _reply(200, b'{"n": 2}\n  '), _reply(200, b'three')]], run)
+
+
+def test_session_sends_headers_each_time():
+    def run(s, fake):
+        s.get('https://a.example/1', {'Authorization': 'Bearer t'})
+        s.get('https://a.example/2', {'Authorization': 'Bearer t', 'Accept': 'x/y'})
+        h1, h2 = fake.made[0].requests[0][1], fake.made[0].requests[1][1]
+        assert h1.get('Host') == 'a.example' and h1.get('Authorization') == 'Bearer t', h1
+        assert h2.get('Accept') == 'x/y' and h2.get('User-Agent') == https.USER_AGENT, h2
+    _with_session([[_reply(200, b'a'), _reply(200, b'b')]], run)
+
+
+def test_session_reconnects_stale_connection():
+    """The server closed the kept connection while idle: reconnect once
+    and send the request again."""
+    def run(s, fake):
+        assert s.get('https://a.example/1') == b'one'
+        assert s.get('https://a.example/2') == b'two'
+        assert len(fake.made) == 2, '%d connections' % len(fake.made)
+        assert fake.made[0].closed, 'stale connection not closed'
+    _with_session([([_reply(200, b'one')], 1), [_reply(200, b'two')]], run)
+
+
+def test_session_new_connection_failure_not_retried():
+    def run(s, fake):
+        _expect_http_error(lambda: s.get('https://a.example/1'), 0)
+        assert len(fake.made) == 1, '%d connections' % len(fake.made)
+    _with_session([[]], run)
+
+
+def test_session_error_closes_connection():
+    def run(s, fake):
+        _expect_http_error(lambda: s.get('https://a.example/1'), 503)
+        assert fake.made[0].closed, 'connection kept after an error'
+        assert s.get('https://a.example/2') == b'ok'
+        assert len(fake.made) == 2, '%d connections' % len(fake.made)
+    _with_session([[_reply(503, b'busy')], [_reply(200, b'ok')]], run)
+
+
+def test_session_honours_connection_close():
+    def run(s, fake):
+        assert s.get('https://a.example/1') == b'one'
+        assert fake.made[0].closed, 'kept a connection the server closes'
+        assert s.get('https://a.example/2') == b'two'
+        assert len(fake.made) == 2, '%d connections' % len(fake.made)
+    _with_session([[_reply(200, b'one', {'connection': 'close'})], [_reply(200, b'two')]], run)
+
+
+def test_session_no_length_reads_to_end_and_closes():
+    def run(s, fake):
+        assert s.get('https://a.example/1') == b'all of it'
+        assert fake.made[0].closed, 'kept a connection with no reply length'
+    _with_session([[_reply(200, b'all of it', {'content-length': None})]], run)
+
+
+def test_session_refuses_chunked():
+    def run(s, fake):
+        _expect_http_error(lambda: s.get('https://a.example/1'), 0)
+        assert fake.made[0].closed, 'connection kept after a chunked reply'
+    _with_session([[_reply(200, b'5\r\nhello\r\n0\r\n\r\n',
+                          {'content-length': None, 'transfer-encoding': 'chunked'})]], run)
+
+
+def test_session_new_host_new_connection():
+    def run(s, fake):
+        s.get('https://a.example/1')
+        s.get('https://b.example/2')
+        assert [c.host for c in fake.made] == ['a.example', 'b.example'], fake.made
+        assert fake.made[0].closed, 'first host connection left open'
+        sent_to_a = [r[0] for r in fake.made[0].requests]
+        assert sent_to_a == ['GET /1 HTTP/1.1'], 'a.example was sent %r' % sent_to_a
+    _with_session([[_reply(200, b'a')], [_reply(200, b'b')]], run)
+
+
+def test_session_close_closes_connection():
+    real = https._connect
+    fake = FakeConnector([[_reply(200, b'a')]])
+    https._connect = fake
+    try:
+        s = https.Session()
+        s.get('https://a.example/1')
+        s.close()
+    finally:
+        https._connect = real
+    assert fake.made[0].closed, 'close() left the connection open'
+
+
+def test_one_tls_context_for_all_connections():
+    """Roots are parsed once, not per connection (each parse held ~4 KB of
+    system RAM until the garbage collector freed the context)."""
+    fake = _FakeSocketModule([])
+    made = [0]
+    loaded = [0]
+
+    def ssl_context(protocol):
+        made[0] += 1
+        return fake
+
+    def load(data):
+        loaded[0] += 1
+    fake.SSLContext = ssl_context
+    fake.load_verify_locations = load
+    saved = (https.socket, https.tls, https._roots, https._ctx)
+    https.socket = https.tls = fake
+    https._roots = lambda: b''
+    https._ctx = None
+    try:
+        https._connect('a.example').close()
+        https._connect('b.example').close()
+    finally:
+        https.socket, https.tls, https._roots, https._ctx = saved
+    assert made[0] == 1 and loaded[0] == 1, 'contexts %d, root loads %d' % (made[0], loaded[0])
+
+
 def run():
     runner = TestRunner()
     runner.run_test("http URL refused", test_http_url_refused)
@@ -511,6 +716,17 @@ def run():
     runner.run_test("Short JSON body is an error", test_json_short_body_is_error)
     runner.run_test("Feeds while reading JSON", test_json_feeds_while_reading)
     runner.run_test("JSON non-200 is an error", test_json_non_200_is_error)
+    runner.run_test("Session reuses one connection", test_session_reuses_connection)
+    runner.run_test("Session sends headers each time", test_session_sends_headers_each_time)
+    runner.run_test("Session reconnects a stale connection once", test_session_reconnects_stale_connection)
+    runner.run_test("Session: new connection failure not retried", test_session_new_connection_failure_not_retried)
+    runner.run_test("Session error closes the connection", test_session_error_closes_connection)
+    runner.run_test("Session honours Connection: close", test_session_honours_connection_close)
+    runner.run_test("Session: no length reads to end, then closes", test_session_no_length_reads_to_end_and_closes)
+    runner.run_test("Session refuses chunked replies", test_session_refuses_chunked)
+    runner.run_test("Session: new host, new connection", test_session_new_host_new_connection)
+    runner.run_test("Session close() closes the connection", test_session_close_closes_connection)
+    runner.run_test("One TLS context for all connections", test_one_tls_context_for_all_connections)
     runner.run_test("Feeds after DNS and after the reply head", test_feeds_after_dns_and_head)
     runner.run_test("GitHub API over verified TLS", test_api_over_verified_tls)
     runner.run_test("Raw file matches its blob hash", test_raw_file_matches_blob_hash)

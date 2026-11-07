@@ -396,37 +396,58 @@ def run():
         got = run_update(fetch=_FakeFetch(_v2(), error=MemoryError()))
         assert got == 'failed: MemoryError', "MemoryError: %r" % got
 
-    def via_https(token='tok'):
-        """run_update with its default fetchers over a fake https.get.
-        Returns (result, [(url, headers, sink given)], fetch)."""
-        github = _FakeGitHub(_v2())
+    def via_https(token='tok', github=None):
+        """run_update with its default fetchers over a fake https.Session.
+        Returns (result, [(url, headers, sink given, 'get'|'json')], fetch,
+        [sessions made]); each session has .closed."""
+        github = github or _FakeGitHub(_v2())
         fetch = _FakeFetch(_v2())
         seen = []
+        sessions = []
 
-        def fake_get(url, headers=None, sink=None, max_bytes=65536):
-            seen.append((url, headers, sink is not None, 'get'))
-            if url.startswith(BLOBS):
-                return fetch.by_blob_url(url, sink)
-            raise HttpError(404)   # JSON must come through get_json; raw host gone
+        class FakeSession:
+            def __init__(self):
+                self.closed = False
+                sessions.append(self)
 
-        def fake_get_json(url, headers=None, max_bytes=65536):
-            seen.append((url, headers, False, 'json'))
-            if url.startswith(API) and not url.startswith(BLOBS):
-                return github(url[len(API):])
-            raise HttpError(404)
+            def get(self, url, headers=None, sink=None, max_bytes=65536):
+                seen.append((url, headers, sink is not None, 'get'))
+                if url.startswith(BLOBS):
+                    return fetch.by_blob_url(url, sink)
+                raise HttpError(404)   # JSON must come through get_json; raw host gone
 
-        real = https.get, https.get_json
-        https.get, https.get_json = fake_get, fake_get_json
+            def get_json(self, url, headers=None, max_bytes=65536):
+                seen.append((url, headers, False, 'json'))
+                if url.startswith(API) and not url.startswith(BLOBS):
+                    return github(url[len(API):])
+                raise HttpError(404)
+
+            def close(self):
+                self.closed = True
+
+        real = https.Session
+        https.Session = FakeSession
         try:
             cfg = dict(CFG)
             cfg['token'] = token
             got = ota.run_update(cfg, True, reset=_Reset())
         finally:
-            https.get, https.get_json = real
-        return got, seen, fetch
+            https.Session = real
+        return got, seen, fetch, sessions
+
+    def test_one_session_closed_after():
+        got, seen, fetch, sessions = via_https()
+        assert got == 'installed ' + C1, "result %r" % got
+        assert len(sessions) == 1, "%d sessions" % len(sessions)
+        assert sessions[0].closed, "session left open after the update"
+        _rm_tree(ROOT)   # the install above started a trial: back to v1
+        _box(_v1())
+        got, seen, fetch, sessions = via_https(github=_FakeGitHub(_v2(), error=HttpError(403)))
+        assert got.startswith('failed: '), "result %r" % got
+        assert len(sessions) == 1 and sessions[0].closed, "session left open after a failure"
 
     def test_api_json_streamed():
-        got, seen, fetch = via_https()
+        got, seen, fetch, sessions = via_https()
         assert got == 'installed ' + C1, "result %r" % got
         api = [(u, kind) for u, _, sink, kind in seen if not sink]
         assert len(api) == 3, "api requests %r" % api
@@ -434,14 +455,14 @@ def run():
             assert kind == 'json', "%s read with %s" % (url[-40:], kind)
 
     def test_files_from_api_blobs():
-        got, seen, fetch = via_https()
+        got, seen, fetch, sessions = via_https()
         files = sorted(u for u, _, sink, _k in seen if sink)
         want = sorted(BLOBS + _git_sha(_v2()[p]) for p in CHANGED)
         assert files == want, "file URLs %r" % files
         assert got == 'installed ' + C1, "result %r" % got
 
     def test_default_fetchers_send_token():
-        got, seen, fetch = via_https()
+        got, seen, fetch, sessions = via_https()
         assert got == 'installed ' + C1, "result %r" % got
         for url, headers, sink, _k in seen:
             want = {'Authorization': 'Bearer tok'}
@@ -555,6 +576,7 @@ def run():
     runner.run_test("Install refused, stage removed", fresh(test_install_refused_stage_removed))
     runner.run_test("Failure text names the cause", fresh(test_failed_text))
     runner.run_test("Files come from the API by blob sha", fresh(test_files_from_api_blobs))
+    runner.run_test("One session per update, closed after", fresh(test_one_session_closed_after))
     runner.run_test("API JSON parsed from the stream", fresh(test_api_json_streamed))
     runner.run_test("Default fetchers send the token, blobs as raw bytes", fresh(test_default_fetchers_send_token))
     runner.run_test("Delete-only update installs", fresh(test_delete_only_installs))

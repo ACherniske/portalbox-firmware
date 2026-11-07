@@ -295,20 +295,25 @@ def _update(cfg, abort, get_json, fetch):
     if state['trial']:
         return 'failed: trial active'   # install() would refuse after the download
     auth = {'Authorization': 'Bearer ' + cfg['token']} if cfg.get('token') else {}
+    session = https.Session()   # one kept connection: one TLS handshake, not one per file
 
     def api_get(path):
-        return https.get_json(_API + path, auth)   # parsed as it arrives
+        return session.get_json(_API + path, auth)   # parsed as it arrives
 
     blobs = _API + '/repos/%s/%s/git/blobs/' % (cfg['user'], cfg['repository'])
     blob_headers = dict(auth)
     blob_headers['Accept'] = _RAW_MEDIA
 
     def blob_get(path, sha, sink):
-        return https.get(blobs + sha, blob_headers, sink=sink)
+        return session.get(blobs + sha, blob_headers, sink=sink)
 
-    get_json = get_json or api_get
-    fetch = fetch or blob_get
+    try:
+        return _apply(cfg, abort, state, get_json or api_get, fetch or blob_get)
+    finally:
+        session.close()
 
+
+def _apply(cfg, abort, state, get_json, fetch):
     target = ota_target.resolve_target(cfg, get_json)
     commit = target['commit']
     if commit in state['bad']:
@@ -344,9 +349,9 @@ def run_update(cfg, at_boot, abort=None, get_json=None, fetch=None, reset=machin
     between files, or after the last one, stops it before the install. After an install it calls reset(),
     so the box boots the new version on trial. It also resets when a
     failed install left its journal (its rollback failed too), so on_boot
-    finishes the rollback. get_json defaults to https.get_json and fetch
-    to https.get of the file's blob, both with the token from cfg (tests
-    pass fakes).
+    finishes the rollback. get_json and fetch default to one
+    https.Session (JSON with get_json, each file's blob with get), with
+    the token from cfg; tests pass fakes.
     """
     journal_before = recovery._exists(recovery.JOURNAL_PATH)
     try:
