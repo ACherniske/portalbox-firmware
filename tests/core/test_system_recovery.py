@@ -413,6 +413,7 @@ def run():
         class FakeConfig:
             pass
 
+        patch.set(system, '_start_wifi_driver', lambda: None)   # no radio in fakes
         patch.set(system, 'get_device', lambda: _Anything())
         patch.set(system, 'apply_feedback', lambda *a, **k: None)
         patch.set(system, 'WiFiConfig', FakeConfig)
@@ -431,6 +432,17 @@ def run():
         except _Retried:
             return 'retry'
         return 'returned'
+
+    def test_boot_starts_wifi_driver_first():
+        # The driver's one-time setup takes ~22 KB of ESP-IDF RAM; it must
+        # happen before anything can grow the Python heap into the reserve.
+        fake_boot(wifi_ok=False)
+        events = []
+        patch.set(system, '_start_wifi_driver', lambda: events.append('wifi driver'))
+        patch.set(system, 'get_device', lambda: events.append('hardware') or _Anything())
+        patch.set(system, '_wifi_retry_reset', lambda *a, **k: None)
+        boot_outcome()
+        assert events[:2] == ['wifi driver', 'hardware'], "boot order %r" % (events,)
 
     def test_boot_no_config_stuck():
         rec = fake_boot(config_ok=False)
@@ -466,6 +478,7 @@ def run():
     runner.run_test("No WiFi config: stuck 'wifi config'", fresh(test_boot_no_config_stuck))
     runner.run_test("Bad WiFi password: stuck 'wifi config'", fresh(test_boot_bad_password_stuck))
     runner.run_test("WiFi connect failure: retry by reset", fresh(test_boot_connect_fail_retries))
+    runner.run_test("WiFi driver starts before the hardware", fresh(test_boot_starts_wifi_driver_first))
 
     # Leave the board as we found it.
     _rm_tree(ROOT)

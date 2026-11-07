@@ -243,6 +243,16 @@ def _wifi_retry_reset(delay_s=30, sleep=time.sleep, reset=machine.reset):
     reset()
 
 
+def _start_wifi_driver():
+    """Set up the WiFi driver before anything else. Its one-time setup takes
+    ~22 KB of ESP-IDF RAM, and the Python heap grows into that RAM and never
+    gives it back: set up later, it can fail with 'WiFi Out of Memory'.
+    Connects later only stop and start the driver, so this runs once per
+    boot."""
+    import network
+    network.WLAN(network.STA_IF)
+
+
 def main():
     """Start the app. core.main is imported only here, after WiFi is up,
     so its code doesn't take the RAM the WiFi login needs."""
@@ -254,6 +264,9 @@ def boot():
     """
     Full system startup sequence.
     """
+
+    # Before the hardware and the app: see _start_wifi_driver().
+    _start_wifi_driver()
 
     _print_banner()
 
