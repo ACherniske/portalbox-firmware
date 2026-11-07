@@ -70,6 +70,18 @@ class _Patch:
             setattr(obj, name, value)
 
 
+class _FakeTicks:
+    """time stand-in: ticks_ms() reads clock[0]; add/diff are the real ones."""
+
+    def __init__(self, clock):
+        self.clock = clock
+        self.ticks_add = time.ticks_add
+        self.ticks_diff = time.ticks_diff
+
+    def ticks_ms(self):
+        return self.clock[0]
+
+
 class _Run:
     """A fake run_update: records each call and returns `result`."""
 
@@ -128,6 +140,19 @@ def run():
         m.state_start_time = time.ticks_add(time.ticks_ms(), -5000)
         got = m.idle_ms()
         assert 5000 <= got < 6000, "idle_ms %d, want ~5000" % got
+
+    def test_idle_survives_ticks_wrap():
+        # ticks_diff only reaches +-2**29 ms (~6.2 days): step a fake clock
+        # an hour at a time through 7 days in IDLE.
+        clock = [0]
+        patch.set(fsm_mod, 'time', _FakeTicks(clock))
+        m = fsm()
+        m.state = fsm_mod.States.IDLE
+        m.state_start_time = clock[0]
+        for hour in range(1, 7 * 24 + 1):
+            clock[0] = time.ticks_add(clock[0], HOUR * 1000)
+            got = m.idle_ms()
+            assert got >= 600000, "idle_ms %d after %d h idle" % (got, hour)
 
     # --- ota.due() -----------------------------------------------------------
 
@@ -300,6 +325,7 @@ def run():
     tests = [
         ("Idle 0 when in session", test_idle_zero_in_session),
         ("Idle grows in IDLE", test_idle_grows),
+        ("Idle survives the ticks wrap", test_idle_survives_ticks_wrap),
         ("Due at boot", test_due_at_boot),
         ("Not due at 9 min idle", test_not_due_9_min),
         ("Due at 10 min idle", test_due_10_min),

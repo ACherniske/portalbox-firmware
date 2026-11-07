@@ -37,6 +37,10 @@ STATE_NAMES = {
     States.TIMEOUT: 'timeout'
 }
 
+# idle_ms() stops growing here (1 day): well past the 10 idle minutes an
+# update check needs, well short of the ~6.2-day ticks wrap.
+IDLE_MS_CAP = 24 * 3600 * 1000
+
 # States in which the relay should be energized (equipment powered).
 # This is an authorization decision the FSM owns directly — unlike
 # LED/buzzer feedback, it is not cosmetic and does not belong in
@@ -133,11 +137,19 @@ class DeviceFSM:
         )
 
     def idle_ms(self):
-        """Milliseconds since entering IDLE; 0 when not IDLE."""
+        """Milliseconds since entering IDLE, at most IDLE_MS_CAP; 0 when not IDLE.
+
+        ticks_diff only reaches 2**29 ms (~6.2 days), so past the cap the
+        start time moves forward and the value stays at the cap.
+        """
 
         if self.state != States.IDLE:
             return 0
-        return self._state_elapsed()
+        elapsed = self._state_elapsed()
+        if elapsed < 0 or elapsed > IDLE_MS_CAP:
+            self.state_start_time = time.ticks_add(time.ticks_ms(), -IDLE_MS_CAP)
+            elapsed = IDLE_MS_CAP
+        return elapsed
 
     def _device_timeout_expired(self):
         """Check if device timeout has expired."""
