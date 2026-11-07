@@ -71,24 +71,6 @@ grep -n "ARG_eap_method" ports/esp32/network_wlan.c
 # Should show line numbers with ARG_eap_method
 ```
 
-### Step 3b: Apply the PortalBox patch
-
-PortalBox firmware is the fork at commit `e244d80` plus the patches in this
-repo's `firmware/` folder. The patch keeps 64 KB of ESP-IDF RAM (with a 40 KB
-contiguous block) out of reach of the Python heap. Without it, the Python heap
-grows into that RAM for good and the WPA2-Enterprise login stalls at boot.
-
-```bash
-# From the micropython root directory
-git checkout e244d80
-git switch -c portalbox/idf-reserve
-git am <path-to-this-repo>/firmware/*.patch
-
-# Verify the patch is in
-grep -n "MICROPY_ESP32_IDF_RESERVE_FREE" ports/esp32/gccollect.c
-# Should show the reserve defines and their use in gc_get_max_new_split()
-```
-
 ## Step 4: Build mpy-cross
 
 mpy-cross is the MicroPython cross-compiler. It compiles Python scripts to bytecode.
