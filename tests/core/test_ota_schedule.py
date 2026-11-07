@@ -211,9 +211,9 @@ def run():
         with open(DEV_FLAG, 'w') as f:
             f.write('')
         fake = _Run()
-        patch.set(system.ota, 'load_config', lambda: ON)
-        patch.set(system.ota, 'run_update', fake)
-        patch.set(system.ota, '_OTA_STATE_PATH', STATE)
+        patch.set(ota, 'load_config', lambda: ON)
+        patch.set(ota, 'run_update', fake)
+        patch.set(ota, '_OTA_STATE_PATH', STATE)
         system._run_ota()
         assert fake.calls == [], "boot check ran in dev mode"
 
@@ -233,8 +233,8 @@ def run():
     def test_boot_uses_schedule():
         # system._run_ota goes through run_if_due with at_boot=True.
         calls = []
-        patch.set(system.ota, 'load_config', lambda: ON)
-        patch.set(system.ota, 'run_if_due',
+        patch.set(ota, 'load_config', lambda: ON)
+        patch.set(ota, 'run_if_due',
                   lambda cfg, at_boot, **k: calls.append((cfg, at_boot)) or 'not due')
         system._run_ota()
         assert calls == [(ON, True)], "calls %r" % (calls,)
@@ -249,8 +249,8 @@ def run():
                 return 600000
 
         device = _Anything()
-        patch.set(app_main.ota, 'load_config', lambda: ON)
-        patch.set(app_main.ota, 'run_if_due',
+        patch.set(ota, 'load_config', lambda: ON)
+        patch.set(ota, 'run_if_due',
                   lambda cfg, at_boot, idle_ms=0, abort=None: calls.append(
                       (cfg, at_boot, idle_ms, abort)) or 'not due')
         app = app_main.Application()

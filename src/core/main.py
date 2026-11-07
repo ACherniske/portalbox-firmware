@@ -8,7 +8,6 @@ import uasyncio as asyncio
 import recovery
 from core.device import get_device, cleanup_device
 from core.fsm import DeviceFSM
-from net import ota
 
 
 # The app counts as healthy once the FSM loop has run this long: the crash
@@ -111,14 +110,19 @@ class Application:
     def _ota_check(self):
         """Update if due; a card put in stops the download."""
 
+        from net import ota
         result = ota.run_if_due(ota.load_config(), at_boot=False,
                                 idle_ms=self.fsm.idle_ms(),
                                 abort=self.device.card_present)
         if result not in ('off', 'dev mode', 'not due'):
             print("[APP] OTA: %s" % result)
 
-    async def _ota_loop(self, every_ms=ota.CHECK_EVERY_S * 1000):
+    async def _ota_loop(self, every_ms=None):
         """Ask for an update check every CHECK_EVERY_S while running."""
+
+        if every_ms is None:
+            from net import ota
+            every_ms = ota.CHECK_EVERY_S * 1000
 
         while self.running:
             await asyncio.sleep_ms(every_ms)

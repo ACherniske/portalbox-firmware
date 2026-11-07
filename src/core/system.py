@@ -14,8 +14,7 @@ import time
 import machine
 
 import recovery
-from net import WiFiConfig, WifiManager, ota
-from core.main import main
+from net import WiFiConfig, WifiManager
 from core.device import get_device
 from core.feedback import apply_feedback
 
@@ -180,6 +179,8 @@ def _print_storage_info():
 
     try:
 
+        from net import ota
+
         # Uses the public ota.storage_info() wrapper rather than the
         # private ota._get_storage_info(), so this module doesn't
         # reach across ota.py's module boundary. Note: storage_info()
@@ -209,6 +210,7 @@ def _run_ota():
     run_if_due() never raises; after an install it resets the box.
     """
 
+    from net import ota
     print('[SYSTEM] OTA: %s' % ota.run_if_due(ota.load_config(), at_boot=True))
 
 
@@ -239,6 +241,13 @@ def _wifi_retry_reset(delay_s=30, sleep=time.sleep, reset=machine.reset):
         sleep(1)
 
     reset()
+
+
+def main():
+    """Start the app. core.main is imported only here, after WiFi is up,
+    so its code doesn't take the RAM the WiFi login needs."""
+    from core.main import main as app_main
+    app_main()
 
 
 def boot():
