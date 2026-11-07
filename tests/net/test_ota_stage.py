@@ -19,8 +19,9 @@ REPO = '/repos/u/r'
 C0 = 'c0' * 20          # version the box runs
 C1 = 'c1' * 20          # target commit
 SRC = 'b0' * 20
-RAW = 'https://raw.githubusercontent.com/u/r/' + C1 + '/'
 API = 'https://api.github.com'
+BLOBS = API + REPO + '/git/blobs/'
+RAW_MEDIA = 'application/vnd.github.raw'
 CFG = {'user': 'u', 'repository': 'r', 'branch': 'main', 'mode': 'branch',
        'enabled': True, 'ignore': [], 'token': ''}
 MARGIN = 32768
@@ -132,14 +133,16 @@ class _FakeGitHub:
 
 
 class _FakeFetch:
-    """Serves target files by raw URL in 100-byte chunks, like https.get
-    with a sink. short: drop the last 3 bytes; wrong: change the last byte;
-    long: add 2000 bytes; error: raise it (mid=True: after writing the
-    first chunk). written: bytes the sink took, per path."""
+    """Serves target files by path in 100-byte chunks, like fetch(path, sha,
+    sink) over https.get. short: drop the last 3 bytes; wrong: change the
+    last byte; long: add 2000 bytes; error: raise it (mid=True: after
+    writing the first chunk). asked: paths in request order; shas: the sha
+    each path was asked for; written: bytes the sink took, per path."""
 
     def __init__(self, files, short=(), wrong=(), long=(), error=None, mid=False):
-        self.bodies = {RAW + 'src/' + p: t.encode() for p, t in files.items()}
-        self.urls = []
+        self.bodies = {p: t.encode() for p, t in files.items()}
+        self.asked = []
+        self.shas = {}
         self.short = short
         self.wrong = wrong
         self.long = long
@@ -147,12 +150,20 @@ class _FakeFetch:
         self.mid = mid
         self.written = {}
 
-    def __call__(self, url, sink):
-        self.urls.append(url)
+    def by_blob_url(self, url, sink):
+        """https.get stand-in for blob URLs: finds the path by its sha."""
+        sha = url[len(BLOBS):]
+        for p, body in self.bodies.items():
+            if _git_sha(body.decode()) == sha:
+                return self(p, sha, sink)
+        raise HttpError(404)
+
+    def __call__(self, path, sha, sink):
+        self.asked.append(path)
+        self.shas[path] = sha
         if self.error and not self.mid:
             raise self.error
-        body = self.bodies[url]
-        path = url[len(RAW) + 4:]
+        body = self.bodies[path]
         if path in self.short:
             body = body[:-3]
         if path in self.wrong:
@@ -167,7 +178,7 @@ class _FakeFetch:
         return len(body)
 
     def paths(self):
-        return sorted(u[len(RAW) + 4:] for u in self.urls)
+        return sorted(self.asked)
 
 
 class _Reset:
@@ -204,7 +215,7 @@ def run():
 
     def stage(target, fetch, **kw):
         plan = _plan(target, _v1())
-        ota_stage.stage(plan, _tree(target), RAW, fetch, **kw)
+        ota_stage.stage(plan, _tree(target), fetch, **kw)
 
     def assert_v1_live(where):
         for p, t in _v1().items():
@@ -225,6 +236,14 @@ def run():
             assert got == _v2()[p], "staged %s is %r" % (p, (got or '')[:40])
         assert_v1_live("after stage")
 
+    def test_stage_asks_by_tree_sha():
+        fetch = _FakeFetch(_v2())
+        stage(_v2(), fetch)
+        for p in CHANGED:
+            want = _git_sha(_v2()[p])
+            assert fetch.shas.get(p) == want, "%s asked as %r, tree sha %s" % (
+                p, fetch.shas.get(p), want)
+
     def test_hash_mismatch():
         e = _raises(lambda: stage(_v2(), _FakeFetch(_v2(), wrong=('core/main.py',))))
         assert str(e) == 'bad hash core/main.py', "error %r" % str(e)
@@ -240,7 +259,7 @@ def run():
         fetch = _FakeFetch(_v2())
         e = _raises(lambda: stage(_v2(), fetch, free_bytes=10))
         assert str(e) == 'no space', "error %r" % str(e)
-        assert fetch.urls == [], "downloaded before the space check: %r" % fetch.urls
+        assert fetch.asked == [], "downloaded before the space check: %r" % fetch.asked
 
     def test_space_margin():
         need = _need(CHANGED, _v2())
@@ -253,7 +272,7 @@ def run():
         fetch = _FakeFetch(_v2())
         e = _raises(lambda: stage(_v2(), fetch, abort=lambda: True))
         assert str(e) == 'aborted', "error %r" % str(e)
-        assert fetch.urls == [], "fetched %r though aborted" % fetch.urls
+        assert fetch.asked == [], "fetched %r though aborted" % fetch.asked
 
     def test_long_body_stops_early():
         fetch = _FakeFetch(_v2(), long=('net/new.py',))
@@ -284,9 +303,9 @@ def run():
 
     def test_abort_between_files():
         fetch = _FakeFetch(_v2())
-        e = _raises(lambda: stage(_v2(), fetch, abort=lambda: len(fetch.urls) >= 1))
+        e = _raises(lambda: stage(_v2(), fetch, abort=lambda: len(fetch.asked) >= 1))
         assert str(e) == 'aborted', "error %r" % str(e)
-        assert len(fetch.urls) == 1, "fetched %r after abort" % fetch.urls
+        assert len(fetch.asked) == 1, "fetched %r after abort" % fetch.asked
         assert_no_stage("abort")
 
     def test_manifest_missing():
@@ -303,7 +322,7 @@ def run():
         target['manifest.json'] = live['manifest.json']
         fetch = _FakeFetch(target)
         plan = _plan(target, live)
-        e = _raises(lambda: ota_stage.stage(plan, _tree(target), RAW, fetch))
+        e = _raises(lambda: ota_stage.stage(plan, _tree(target), fetch))
         assert str(e) == 'manifest net/gone.py missing', "error %r" % str(e)
         assert 'manifest.json' not in fetch.paths(), "manifest fetched though unchanged"
 
@@ -334,7 +353,7 @@ def run():
         fetch = _FakeFetch(_v2())
         got = run_update(fetch=fetch, reset=reset)
         assert got == 'bad version', "result %r" % got
-        assert fetch.urls == [] and reset.calls == 0, "downloaded or reset"
+        assert fetch.asked == [] and reset.calls == 0, "downloaded or reset"
         assert _logged('ota boot bad version'), "not logged"
 
     def test_same_version_up_to_date():
@@ -342,7 +361,7 @@ def run():
         fetch = _FakeFetch(_v2())
         got = run_update(fetch=fetch)
         assert got == 'up to date', "result %r" % got
-        assert fetch.urls == [], "downloaded %r" % fetch.urls
+        assert fetch.asked == [], "downloaded %r" % fetch.asked
 
     def test_http_403_failed():
         reset = _Reset()
@@ -377,30 +396,46 @@ def run():
         got = run_update(fetch=_FakeFetch(_v2(), error=MemoryError()))
         assert got == 'failed: MemoryError', "MemoryError: %r" % got
 
-    def test_default_fetchers_send_token():
+    def via_https(token='tok'):
+        """run_update with its default fetchers over a fake https.get.
+        Returns (result, [(url, headers, sink given)], fetch)."""
         github = _FakeGitHub(_v2())
         fetch = _FakeFetch(_v2())
         seen = []
 
         def fake_get(url, headers=None, sink=None, max_bytes=65536):
-            seen.append((url[:30], headers))
+            seen.append((url, headers, sink is not None))
+            if url.startswith(BLOBS):
+                return fetch.by_blob_url(url, sink)
             if url.startswith(API):
                 return json.dumps(github(url[len(API):])).encode()
-            return fetch(url, sink)
+            raise HttpError(404)   # raw.githubusercontent.com or anything else
 
         real = https.get
         https.get = fake_get
         try:
             cfg = dict(CFG)
-            cfg['token'] = 'tok'
+            cfg['token'] = token
             got = ota.run_update(cfg, True, reset=_Reset())
         finally:
             https.get = real
+        return got, seen, fetch
+
+    def test_files_from_api_blobs():
+        got, seen, fetch = via_https()
+        files = sorted(u for u, _, sink in seen if sink)
+        want = sorted(BLOBS + _git_sha(_v2()[p]) for p in CHANGED)
+        assert files == want, "file URLs %r" % files
         assert got == 'installed ' + C1, "result %r" % got
-        assert len(github.calls) == 3 and len(fetch.urls) == len(CHANGED), \
-            "api %d raw %d" % (len(github.calls), len(fetch.urls))
-        for url, headers in seen:
-            assert headers == {'Authorization': 'Bearer tok'}, "%s headers %r" % (url, headers)
+
+    def test_default_fetchers_send_token():
+        got, seen, fetch = via_https()
+        assert got == 'installed ' + C1, "result %r" % got
+        for url, headers, sink in seen:
+            want = {'Authorization': 'Bearer tok'}
+            if sink:
+                want['Accept'] = RAW_MEDIA   # the bytes, not base64 JSON
+            assert headers == want, "%s headers %r" % (url[-50:], headers)
 
     def test_delete_only_installs():
         live = _v1()
@@ -411,7 +446,7 @@ def run():
         got = run_update(github=_FakeGitHub(_v1()), fetch=fetch, reset=reset)
         assert got == 'installed ' + C1, "result %r" % got
         assert not _exists(_live('net/extra.py')), "net/extra.py not deleted"
-        assert fetch.urls == [], "downloaded %r" % fetch.urls
+        assert fetch.asked == [], "downloaded %r" % fetch.asked
         assert reset.calls == 1, "reset %d times" % reset.calls
 
     def test_journal_left_resets():
@@ -454,7 +489,7 @@ def run():
         fetch = _FakeFetch(_v2())
         got = run_update(fetch=fetch)
         assert got == 'failed: trial active', "result %r" % got
-        assert fetch.urls == [], "downloaded during a trial"
+        assert fetch.asked == [], "downloaded during a trial"
 
     def test_no_change_saves_version():
         _box(_v1(), version=None, managed=[])   # set up by cable: nothing saved yet
@@ -466,15 +501,15 @@ def run():
         assert state['version'] == C1, "version %r" % state['version']
         assert sorted(state['managed']) == sorted(_managed(_v1())), "managed %r" % (state['managed'],)
         assert state['trial'] is False, "trial started"
-        assert fetch.urls == [] and reset.calls == 0, "downloaded or reset"
+        assert fetch.asked == [] and reset.calls == 0, "downloaded or reset"
 
     def test_abort_after_last_file():
         """A card tapped during the last download: no install, no reset."""
         reset = _Reset()
         fetch = _FakeFetch(_v2())
         got = run_update(fetch=fetch, reset=reset,
-                         abort=lambda: len(fetch.urls) >= len(CHANGED))
-        assert len(fetch.urls) == len(CHANGED), "fetched %r" % (fetch.paths(),)
+                         abort=lambda: len(fetch.asked) >= len(CHANGED))
+        assert len(fetch.asked) == len(CHANGED), "fetched %r" % (fetch.paths(),)
         assert got == 'failed: aborted', "result %r" % got
         assert reset.calls == 0, "reset %d times" % reset.calls
         assert_v1_live("abort after last file")
@@ -487,6 +522,7 @@ def run():
         assert _logged('ota idle installed ' + C1), "log %r" % _read(recovery.LOG_PATH)
 
     runner.run_test("Good files staged, live untouched", fresh(test_stage_good))
+    runner.run_test("Stage asks for each file by its tree sha", fresh(test_stage_asks_by_tree_sha))
     runner.run_test("Hash mismatch fails, live untouched", fresh(test_hash_mismatch))
     runner.run_test("Short body fails", fresh(test_short_body))
     runner.run_test("No space refused before download", fresh(test_no_space))
@@ -506,7 +542,8 @@ def run():
     runner.run_test("Run never raises", fresh(test_run_never_raises))
     runner.run_test("Install refused, stage removed", fresh(test_install_refused_stage_removed))
     runner.run_test("Failure text names the cause", fresh(test_failed_text))
-    runner.run_test("Default fetchers send the token", fresh(test_default_fetchers_send_token))
+    runner.run_test("Files come from the API by blob sha", fresh(test_files_from_api_blobs))
+    runner.run_test("Default fetchers send the token, blobs as raw bytes", fresh(test_default_fetchers_send_token))
     runner.run_test("Delete-only update installs", fresh(test_delete_only_installs))
     runner.run_test("Install that leaves its journal resets", fresh(test_journal_left_resets))
     runner.run_test("Off does nothing", fresh(test_off))

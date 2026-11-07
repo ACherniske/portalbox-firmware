@@ -22,7 +22,10 @@ from net.https import HttpError
 from net.ota_target import OtaError
 
 _API = 'https://api.github.com'
-_RAW = 'https://raw.githubusercontent.com/%s/%s/%s/'
+# Files come from the API by blob sha, as raw bytes: api.github.com's ECC
+# certificate chain needs far less RAM to check than raw.githubusercontent.com's
+# RSA-4096 one, which failed on boxes without PSRAM.
+_RAW_MEDIA = 'application/vnd.github.raw'
 _CONFIG_PATH = '/config/ota_config.json'
 _OTA_STATE_PATH = '/config/ota_state.json'
 _OTA_INTERVAL_SECONDS = 24 * 60 * 60   # wait after a good check
@@ -296,11 +299,15 @@ def _update(cfg, abort, get_json, fetch):
     def api_get(path):
         return json.loads(https.get(_API + path, auth))
 
-    def raw_get(url, sink):
-        return https.get(url, auth, sink=sink)
+    blobs = _API + '/repos/%s/%s/git/blobs/' % (cfg['user'], cfg['repository'])
+    blob_headers = dict(auth)
+    blob_headers['Accept'] = _RAW_MEDIA
+
+    def blob_get(path, sha, sink):
+        return https.get(blobs + sha, blob_headers, sink=sink)
 
     get_json = get_json or api_get
-    fetch = fetch or raw_get
+    fetch = fetch or blob_get
 
     target = ota_target.resolve_target(cfg, get_json)
     commit = target['commit']
@@ -318,9 +325,8 @@ def _update(cfg, abort, get_json, fetch):
         state['managed'] = plan['managed']
         recovery.save_state(state)
         return 'up to date'
-    # The commit sha in the URL pins every file to the same version.
-    raw = _RAW % (cfg['user'], cfg['repository'], commit)
-    ota_stage.stage(plan, tree, raw, fetch, abort)
+    # Blob shas from the tree pin every file to the same version.
+    ota_stage.stage(plan, tree, fetch, abort)
     # stage() checks only before each file: a card tapped during the
     # last download must stop the install and its reset too.
     if abort and abort():

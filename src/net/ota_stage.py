@@ -73,18 +73,18 @@ def space_needed(files):
     return total + 2 * block * len(folders) + MARGIN
 
 
-def stage(plan, tree, raw_base, fetch, abort=None, free_bytes=None):
+def stage(plan, tree, fetch, abort=None, free_bytes=None):
     """Download plan['files'] into recovery.STAGE_DIR and check each one.
 
-    fetch(url, sink) streams the body at url to sink.write. The URL is
-    raw_base + 'src/' + path. Raises OtaError for: less free flash than
+    fetch(path, sha, sink) streams the file `path` of the tree, git blob
+    `sha`, to sink.write. Raises OtaError for: less free flash than
     space_needed() ('no space'), abort() true before a file ('aborted'), a size or hash
     that differs from the tree ('bad hash <path>'), or a manifest path
     that is not a file in the target tree ('manifest <path> missing').
     On any error the stage folder is removed and the error re-raised.
     """
     try:
-        _stage(plan, tree, raw_base, fetch, abort, free_bytes)
+        _stage(plan, tree, fetch, abort, free_bytes)
     except BaseException:
         try:
             recovery._rm_tree(recovery.STAGE_DIR)
@@ -93,7 +93,7 @@ def stage(plan, tree, raw_base, fetch, abort=None, free_bytes=None):
         raise
 
 
-def _stage(plan, tree, raw_base, fetch, abort, free_bytes):
+def _stage(plan, tree, fetch, abort, free_bytes):
     recovery._rm_tree(recovery.STAGE_DIR)   # leftovers from a cut-off run
     files = plan['files']
     if space_needed(files) > (free_space() if free_bytes is None else free_bytes):
@@ -105,7 +105,7 @@ def _stage(plan, tree, raw_base, fetch, abort, free_bytes):
         recovery._make_parent(dest)
         with open(dest, 'wb') as f:
             sink = _Sink(f, path, size)
-            fetch(raw_base + 'src/' + path, sink)
+            fetch(path, sha, sink)
         if sink.count != size or _hex(sink.hash) != sha:
             raise OtaError('bad hash ' + path)
     _check_manifest(files, tree)

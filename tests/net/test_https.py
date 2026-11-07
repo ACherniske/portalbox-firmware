@@ -228,6 +228,21 @@ def test_raw_file_matches_blob_hash():
     assert got == MAIN_HASH, 'hash %s (len %d)' % (got, len(body))
 
 
+def test_blob_api_gives_raw_bytes():
+    """GitHub's side of the OTA download: the blob API, asked with the media
+    type ota uses, streams the file's bytes (not base64 JSON)."""
+    from net import ota
+    _online()
+    headers = _auth()
+    headers['Accept'] = ota._RAW_MEDIA
+    sink = CountingSink(WIFI_SIZE)
+    url = 'https://api.github.com/repos/ACherniske/portalbox-firmware/git/blobs/' + WIFI_HASH
+    got = https.get(url, headers=headers, sink=sink)
+    assert got == WIFI_SIZE and sink.count == WIFI_SIZE, 'got %d bytes, want %d' % (
+        sink.count, WIFI_SIZE)
+    assert sink.blob_hash() == WIFI_HASH, 'hash %s' % sink.blob_hash()
+
+
 def test_self_signed_refused():
     _online()
     try:
@@ -412,6 +427,7 @@ def run():
     runner.run_test("Feeds after DNS and after the reply head", test_feeds_after_dns_and_head)
     runner.run_test("GitHub API over verified TLS", test_api_over_verified_tls)
     runner.run_test("Raw file matches its blob hash", test_raw_file_matches_blob_hash)
+    runner.run_test("Blob API gives raw bytes", test_blob_api_gives_raw_bytes)
     runner.run_test("Self-signed server refused", test_self_signed_refused)
     runner.run_test("Wrong host refused", test_wrong_host_refused)
     runner.run_test("Missing repo is 404", test_missing_repo_is_404)
