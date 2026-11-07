@@ -85,6 +85,7 @@ class WifiManager:
         # disconnect reason until a new one arrives, so a code equal to this
         # may be left over from the previous attempt.
         self._pre_status = None
+        self._ram_logged = False
 
         print("[WiFi] Manager initialized")
 
@@ -437,10 +438,13 @@ class WifiManager:
             self._log(f"[WiFi] Clock was behind; set to floor {time.localtime()[:3]}")
 
         # Free RAM before each login: too little makes the login stall
-        # silently, so the log shows it when a box can't connect.
+        # silently, so the log shows it when a box can't connect. The event
+        # log gets it once per boot (retries would push older lines out).
         ram = 'connect, ram %d/%d' % idf_ram()
         self._log('[WiFi] ' + ram)
-        recovery.log('wifi', ram)
+        if not self._ram_logged:
+            recovery.log('wifi', ram)
+            self._ram_logged = True
 
         self._pre_status = self.nic.status()
 

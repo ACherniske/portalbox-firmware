@@ -124,7 +124,10 @@ def run():
         saved = recovery.log
         recovery.log = lambda tag, msg: logged.append((tag, msg))
         try:
-            mgr = _manager([1001, 1010], pre=None)
+            # Two attempts (a retry): the event log gets the line once, so a
+            # long WiFi outage doesn't push older lines out of the log.
+            mgr = _manager([1001, 1010, 1001, 1010], pre=None)
+            mgr.connect('password123', skip_init=True)
             mgr.connect('password123', skip_init=True)
         finally:
             recovery.log = saved
