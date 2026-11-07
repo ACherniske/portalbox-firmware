@@ -20,6 +20,7 @@
   "src/core/feedback.py",
   "src/core/fsm.py",
   "src/core/main.py",
+  "src/core/system.py",
 
   "src/hardware/button.py",
   "src/hardware/buzzer.py",

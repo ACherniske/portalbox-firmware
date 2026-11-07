@@ -248,6 +248,13 @@ def run():
         finally:
             _rm_cfg()
 
+    def test_manifest_lists_required():
+        import json
+        with open('/manifest.json') as f:
+            listed = json.load(f)
+        missing = [p for p in ota_target.REQUIRED if 'src/' + p not in listed]
+        assert not missing, "manifest.json misses %r" % missing
+
     runner.run_test("Release resolves to its commit", test_release_lightweight)
     runner.run_test("Annotated tag dereferenced", test_annotated_tag)
     runner.run_test("Branch mode uses branch tip", test_branch_mode)
@@ -264,6 +271,7 @@ def run():
     runner.run_test("Local-only and ignored files never planned", test_local_and_ignored)
     runner.run_test("OTA off without config", test_off_without_config)
     runner.run_test("Config read with defaults", test_config_read)
+    runner.run_test("Manifest lists every required file", test_manifest_lists_required)
 
     runner.final_report()
 
