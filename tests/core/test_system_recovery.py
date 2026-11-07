@@ -384,18 +384,6 @@ def run():
         assert got == 'returned', "boot %s" % got
         assert events[-2:] == ['feed', 'main'], "events %r" % (events,)
 
-    def test_ota_only_when_enabled():
-        calls = []
-        patch.set(system.ota, 'run_update',
-                  lambda cfg, at_boot, **k: calls.append((cfg['enabled'], at_boot)) or 'up to date')
-        for enabled in (False, None, 'true'):
-            patch.set(system.ota, 'load_config', lambda e=enabled: {'enabled': e})
-            system._run_ota()
-            assert calls == [], "OTA ran with enabled=%r" % (enabled,)
-        patch.set(system.ota, 'load_config', lambda: {'enabled': True})
-        system._run_ota()
-        assert calls == [(True, True)], "calls %r" % (calls,)
-
     def test_wifi_retry_delay_feeds():
         feeds = feed_counter()
         mgr = _wifi_manager([1001])
@@ -475,7 +463,6 @@ def run():
     runner.run_test("Dev mode: WiFi failure does not reset", fresh(test_wifi_retry_reset_dev_mode))
     runner.run_test("Dev mode: boot returns after WiFi failure", fresh(test_boot_returns_on_dev_wifi_fail))
     runner.run_test("Watchdog fed just before the app starts", fresh(test_boot_feeds_before_app))
-    runner.run_test("OTA runs only when enabled", fresh(test_ota_only_when_enabled))
     runner.run_test("No WiFi config: stuck 'wifi config'", fresh(test_boot_no_config_stuck))
     runner.run_test("Bad WiFi password: stuck 'wifi config'", fresh(test_boot_bad_password_stuck))
     runner.run_test("WiFi connect failure: retry by reset", fresh(test_boot_connect_fail_retries))

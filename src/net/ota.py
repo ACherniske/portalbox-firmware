@@ -25,7 +25,10 @@ _API = 'https://api.github.com'
 _RAW = 'https://raw.githubusercontent.com/%s/%s/%s/'
 _CONFIG_PATH = '/config/ota_config.json'
 _OTA_STATE_PATH = '/config/ota_state.json'
-_OTA_INTERVAL_SECONDS = 24 * 60 * 60
+_OTA_INTERVAL_SECONDS = 24 * 60 * 60   # wait after a good check
+_RETRY_AFTER_FAIL_S = 60 * 60          # wait after a failed one
+IDLE_BEFORE_UPDATE_MS = 600000         # idle this long before an idle check
+CHECK_EVERY_S = 60                     # how often the app asks due()
 # 2023-11-14 on the board's own epoch (2000 on this port, not 1970).
 _MIN_VALID_EPOCH = time.mktime((2023, 11, 14, 0, 0, 0, 0, 0))
 _PROTECTED_PATHS = [
@@ -213,16 +216,51 @@ def _save_ota_state(state, state_path=_OTA_STATE_PATH):
         print('[OTA] Warning: failed to save OTA state: %s' % error)
 
 
-def _should_run_daily_ota(now_epoch, state):
-    """Return True when the stored OTA timestamp is stale or unavailable."""
-    if now_epoch < _MIN_VALID_EPOCH:
-        print('[OTA] Clock not synchronized yet; running OTA this boot.')
-        return True
+def _since(now, state, key):
+    last = state.get(key, 0)
+    return now - last if isinstance(last, int) else _OTA_INTERVAL_SECONDS
 
-    last_run = state.get('last_success_epoch', 0)
-    if not isinstance(last_run, int):
-        return True
-    return (now_epoch - last_run) >= _OTA_INTERVAL_SECONDS
+
+def due(now, state, at_boot, idle_ms, clock_ok):
+    """True when it is time to check for an update.
+
+    Never with the clock unset; a day after a good check, an hour after
+    a failed one; then at boot, or once the box has been idle 10 min.
+    """
+    if not clock_ok:
+        print('[OTA] clock not set')
+        return False
+    if _since(now, state, 'last_success_epoch') < _OTA_INTERVAL_SECONDS:
+        return False
+    if _since(now, state, 'last_try_epoch') < _RETRY_AFTER_FAIL_S:
+        return False
+    return at_boot or idle_ms >= IDLE_BEFORE_UPDATE_MS
+
+
+def run_if_due(cfg, at_boot, idle_ms=0, abort=None, now=None, run=None,
+               state_path=None):
+    """run_update() when OTA is on, not in dev mode, and due().
+
+    Returns 'off', 'dev mode', 'not due', or run_update()'s result. The
+    try time is saved before the run (an install resets the box inside
+    it); the success time after any result but 'failed: ...'.
+    """
+    if cfg.get('enabled') is not True:
+        return 'off'
+    if recovery.dev_mode():
+        return 'dev mode'
+    now = time.time() if now is None else now
+    state_path = state_path or _OTA_STATE_PATH
+    state = _load_ota_state(state_path)
+    if not due(now, state, at_boot, idle_ms, now >= _MIN_VALID_EPOCH):
+        return 'not due'
+    state['last_try_epoch'] = now
+    _save_ota_state(state, state_path)
+    result = (run or run_update)(cfg, at_boot, abort=abort)
+    if not result.startswith('failed'):
+        state['last_success_epoch'] = now
+        _save_ota_state(state, state_path)
+    return result
 
 
 def _reason(e):

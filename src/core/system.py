@@ -204,18 +204,12 @@ def _print_storage_info():
 
 
 def _run_ota():
-    """Check for an update at boot, only if the OTA config turns it on.
+    """Check for an update at boot when OTA is on, not in dev mode, and due.
 
-    run_update() never raises; after an install it resets the box.
+    run_if_due() never raises; after an install it resets the box.
     """
 
-    cfg = ota.load_config()
-
-    if cfg.get('enabled') is not True:
-        print('[SYSTEM] OTA off')
-        return
-
-    print('[SYSTEM] OTA: %s' % ota.run_update(cfg, at_boot=True))
+    print('[SYSTEM] OTA: %s' % ota.run_if_due(ota.load_config(), at_boot=True))
 
 
 def _wifi_retry_reset(delay_s=30, sleep=time.sleep, reset=machine.reset):

@@ -132,6 +132,13 @@ class DeviceFSM:
             self.state_start_time
         )
 
+    def idle_ms(self):
+        """Milliseconds since entering IDLE; 0 when not IDLE."""
+
+        if self.state != States.IDLE:
+            return 0
+        return self._state_elapsed()
+
     def _device_timeout_expired(self):
         """Check if device timeout has expired."""
 
