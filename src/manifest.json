@@ -11,6 +11,7 @@
   "src/net/clock.py",
   "src/net/ota.py",
   "src/net/ota_target.py",
+  "src/net/ota_stage.py",
   "src/net/https.py",
   "src/certs/github_roots.pem",
 

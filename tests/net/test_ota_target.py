@@ -17,10 +17,11 @@ T1 = 't1' * 20          # annotated tag object
 ROOT = 'a0' * 20        # root tree
 SRC = 'b0' * 20         # src tree
 CFG_PATH = '/test_ota_cfg.json'
-# Owner ruling 2026-11-06: what the box needs to boot and reach GitHub again.
+# Owner rulings 2026-11-06: what the box needs to boot and reach GitHub again
+# (net/ota_stage.py added after the Task 8 review: ota imports it).
 REQUIRED = ('boot.py', 'main.py', 'recovery.py', 'core/system.py', 'core/main.py',
-            'net/ota.py', 'net/ota_target.py', 'net/https.py', 'net/wifi.py',
-            'certs/github_roots.pem', 'manifest.json')
+            'net/ota.py', 'net/ota_target.py', 'net/ota_stage.py', 'net/https.py',
+            'net/wifi.py', 'certs/github_roots.pem', 'manifest.json')
 
 
 def _sha(n):

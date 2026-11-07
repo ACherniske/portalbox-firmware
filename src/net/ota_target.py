@@ -18,7 +18,7 @@ class OtaError(Exception):
 REQUIRED = (
     'boot.py', 'main.py', 'recovery.py',
     'core/system.py', 'core/main.py',
-    'net/ota.py', 'net/ota_target.py', 'net/https.py', 'net/wifi.py',
+    'net/ota.py', 'net/ota_target.py', 'net/ota_stage.py', 'net/https.py', 'net/wifi.py',
     'certs/github_roots.pem', 'manifest.json',
 )
 

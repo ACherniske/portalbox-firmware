@@ -386,14 +386,15 @@ def run():
 
     def test_ota_only_when_enabled():
         calls = []
-        patch.set(system.ota, 'run_daily_update_if_due', lambda **k: calls.append(1))
+        patch.set(system.ota, 'run_update',
+                  lambda cfg, at_boot, **k: calls.append((cfg['enabled'], at_boot)) or 'up to date')
         for enabled in (False, None, 'true'):
             patch.set(system.ota, 'load_config', lambda e=enabled: {'enabled': e})
             system._run_ota()
-            assert calls == [], "old OTA ran with enabled=%r" % (enabled,)
+            assert calls == [], "OTA ran with enabled=%r" % (enabled,)
         patch.set(system.ota, 'load_config', lambda: {'enabled': True})
         system._run_ota()
-        assert calls == [1], "OTA did not run when enabled"
+        assert calls == [(True, True)], "calls %r" % (calls,)
 
     def test_wifi_retry_delay_feeds():
         feeds = feed_counter()
