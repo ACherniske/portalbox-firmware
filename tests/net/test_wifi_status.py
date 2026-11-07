@@ -118,6 +118,22 @@ def run():
         assert mgr._pre_status == 201, "_pre_status is %r" % mgr._pre_status
         _stop_autosave()
 
+    def test_connect_logs_free_ram():
+        import recovery
+        logged = []
+        saved = recovery.log
+        recovery.log = lambda tag, msg: logged.append((tag, msg))
+        try:
+            mgr = _manager([1001, 1010], pre=None)
+            mgr.connect('password123', skip_init=True)
+        finally:
+            recovery.log = saved
+            _stop_autosave()
+        lines = [msg for tag, msg in logged if tag == 'wifi' and msg.startswith('connect, ram ')]
+        assert len(lines) == 1, "wifi log lines %r" % (logged,)
+        free, largest = lines[0][len('connect, ram '):].split('/')
+        assert int(free) > 0 and int(largest) > 0, "line %r" % lines[0]
+
     def test_every_status_named():
         for name in dir(NetworkStatus):
             if name.startswith('_'):
@@ -136,6 +152,7 @@ def run():
     runner.run_test("GOT_IP connects", test_got_ip)
     runner.run_test("connect() records the pre-connect code", test_connect_records_pre_status)
     runner.run_test("Every status code has a name", test_every_status_named)
+    runner.run_test("Connect logs free RAM", test_connect_logs_free_ram)
 
     _stop_autosave()
     runner.final_report()

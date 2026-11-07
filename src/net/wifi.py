@@ -1,9 +1,17 @@
+import esp32
 import network
 import time
 
 import recovery
 from .models import WiFiConfig, NetworkType, NetworkStatus, EAPMethod
 from . import clock
+
+
+def idf_ram():
+    """(free, largest free block) of ESP-IDF's data RAM, which the WiFi
+    login's TLS draws on. The login needs a ~17 KB block in one piece."""
+    rows = esp32.idf_heap_info(esp32.HEAP_DATA)
+    return sum(r[1] for r in rows), max(r[2] for r in rows)
 
 # nic.connect() hands ESP-IDF a pointer into each cert/key str without a copy.
 # ESP-IDF reads it again on every EAP handshake (including auto-reconnects),
@@ -427,6 +435,12 @@ class WifiManager:
         # after power-on. Move it up to the floor before any login attempt.
         if clock.apply_floor():
             self._log(f"[WiFi] Clock was behind; set to floor {time.localtime()[:3]}")
+
+        # Free RAM before each login: too little makes the login stall
+        # silently, so the log shows it when a box can't connect.
+        ram = 'connect, ram %d/%d' % idf_ram()
+        self._log('[WiFi] ' + ram)
+        recovery.log('wifi', ram)
 
         self._pre_status = self.nic.status()
 
