@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ACherniske <apcherniske@gmail.com>
+Date: Sat, 7 Nov 2026 11:25:57 -0500
+Subject: [PATCH] esp32: keep an ESP-IDF heap reserve for WiFi/TLS
+
+---
+ ports/esp32/gccollect.c | 23 ++++++++++++++++++++---
+ 1 file changed, 20 insertions(+), 3 deletions(-)
+
+diff --git a/ports/esp32/gccollect.c b/ports/esp32/gccollect.c
+index e6c17fda6..e876a9cbb 100644
+--- a/ports/esp32/gccollect.c
++++ b/ports/esp32/gccollect.c
+@@ -79,10 +79,27 @@ void gc_collect(void) {
+ 
+ #if MICROPY_GC_SPLIT_HEAP_AUTO
+ 
+-// The largest new region that is available to become Python heap is the largest
+-// free block in the ESP-IDF system heap.
++// ESP-IDF RAM the Python heap never grows into. Without it the Python heap
++// can take nearly all of it, and WiFi then can't buffer packets or find the
++// ~17 KB contiguous block a WPA2-Enterprise (TLS) login needs: the login
++// stalls with no error. The heap also never gives RAM back, so this must be
++// kept at every growth step. Boards can override both values.
++#ifndef MICROPY_ESP32_IDF_RESERVE_FREE
++#define MICROPY_ESP32_IDF_RESERVE_FREE (64 * 1024)   // total free left to ESP-IDF
++#endif
++#ifndef MICROPY_ESP32_IDF_RESERVE_BLOCK
++#define MICROPY_ESP32_IDF_RESERVE_BLOCK (40 * 1024)  // largest free block left
++#endif
++
++// The largest new region that may become Python heap: the largest free block
++// in the ESP-IDF system heap, less what keeps both reserves.
+ size_t gc_get_max_new_split(void) {
+-    return heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
++    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
++    size_t free = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
++    if (largest <= MICROPY_ESP32_IDF_RESERVE_BLOCK || free <= MICROPY_ESP32_IDF_RESERVE_FREE) {
++        return 0;
++    }
++    return MIN(largest - MICROPY_ESP32_IDF_RESERVE_BLOCK, free - MICROPY_ESP32_IDF_RESERVE_FREE);
+ }
+ 
+ #endif
+-- 
+2.53.0
+
