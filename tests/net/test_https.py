@@ -188,6 +188,23 @@ def test_missing_repo_is_404():
         404)
 
 
+def test_feeds_through_connect_and_handshake():
+    """Connect and the TLS handshake can each take up to TIMEOUT_S (15 s),
+    so the 30 s watchdog must be fed at the start of each request, after
+    connect and after the handshake: 3 feeds even for a reply with no body read."""
+    _online()
+    feeds = []
+    real = recovery.feed
+    recovery.feed = lambda: feeds.append(1)
+    try:
+        _expect_http_error(
+            lambda: https.get('https://api.github.com/repos/ACherniske/no-such-repo-x'),
+            404)
+    finally:
+        recovery.feed = real
+    assert len(feeds) >= 3, "%d feeds for one request, want >= 3" % len(feeds)
+
+
 def test_sink_gets_every_byte():
     _online()
     sink = CountingSink(WIFI_SIZE)
@@ -328,6 +345,7 @@ def run():
     runner.run_test("Self-signed server refused", test_self_signed_refused)
     runner.run_test("Wrong host refused", test_wrong_host_refused)
     runner.run_test("Missing repo is 404", test_missing_repo_is_404)
+    runner.run_test("Feeds through connect and handshake", test_feeds_through_connect_and_handshake)
     runner.run_test("Sink gets every byte", test_sink_gets_every_byte)
     runner.run_test("Body over max_bytes is an error", test_body_over_max_bytes)
     runner.final_report()

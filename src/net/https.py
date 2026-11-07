@@ -55,7 +55,11 @@ def _request(host, path, headers):
     try:
         sock.settimeout(TIMEOUT_S)
         sock.connect(addr)
+        # Connect and the handshake can each take up to TIMEOUT_S: two in
+        # a row would pass the 30 s watchdog.
+        recovery.feed()
         stream = ctx.wrap_socket(sock, server_hostname=name)
+        recovery.feed()
     except Exception:
         sock.close()
         raise
@@ -119,6 +123,7 @@ def get(url, headers=None, sink=None, max_bytes=65536):
     sent = {'User-Agent': USER_AGENT}
     sent.update(headers or {})
     for hop in range(MAX_REDIRECTS + 1):
+        recovery.feed()
         host, path = _split(url)
         status, reply, stream = _request(host, path, sent)
         try:
