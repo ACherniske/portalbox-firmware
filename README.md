@@ -48,7 +48,8 @@ ota.create_config(user='ACherniske', repository='portalbox-firmware',
 gh release create vX.Y.Z --target main --generate-notes
 ```
 
-Boxes in release mode install it at their next boot, or within a day.
+Boxes in release mode install it within a day of their last check, at a boot or
+after 10 idle minutes.
 
 ### Dev flag
 
@@ -63,9 +64,10 @@ import os; os.remove('/config/dev_mode')  # off
 
 ### Safe mode
 
-Hold the box button (or the BOOT button) for 3 seconds while powering on. The
-box skips WiFi, updates and the app, and leaves the REPL open over USB with no
-watchdog. This is how to reach a box that is not in dev mode with `mpremote`.
+Hold the box button (or the BOOT button) from power-on for about 5 seconds, until
+`SAFE MODE ENABLED` prints over USB. The box skips WiFi, updates and the app,
+and leaves the REPL open over USB with no watchdog. This is how to reach a box
+that is not in dev mode with `mpremote`.
 
 ### What the box did: `/log/events.log`
 
