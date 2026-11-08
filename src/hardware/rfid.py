@@ -52,11 +52,15 @@ class RFIDReader:
         if status != self.reader.OK:
             return self.reader.ERROR, None
 
-        # Select card
-        if self.reader.select_card(uid) == 0:
+        # Select card: returns the card's SAK byte, or ERROR when the select
+        # fails. SAK 0x00 (Ultralight/NTAG) is a good card; no card type
+        # uses SAK 0x01, so it can't be mistaken for ERROR.
+        if self.reader.select_card(uid) == self.reader.ERROR:
             return self.reader.ERROR, None
 
-        return self.reader.OK, uid[:4]  # Return only the first 4 bytes of UID
+        # The card ID is the first 4 bytes of cascade level 1, also for
+        # 7-byte-UID cards: the server and the Pi boxes use exactly this.
+        return self.reader.OK, uid[:4]
 
     def read_card(self):
         """
