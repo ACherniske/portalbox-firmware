@@ -55,6 +55,12 @@ class FakeApi:
             raise OSError(110)
         return True
 
+    def hold(self):
+        self.events.append(('hold',))
+
+    def release(self):
+        self.events.append(('release',))
+
     def calls(self, name):
         return [e for e in self.events if e[0] == name]
 
@@ -280,7 +286,8 @@ def run():
         r.tap(B)
         tail = r.events[start:]
         calls = [e for e in tail if e[0] != 'relay']
-        assert calls == [('change', A, B), ('deactivate', A), ('activate', B)], "calls %r" % (calls,)
+        want = [('hold',), ('change', A, B), ('deactivate', A), ('activate', B), ('release',)]
+        assert calls == want, "calls %r" % (calls,)
         assert ('relay', False) not in tail, "power cut in the hand-off: %r" % (tail,)
         assert r.state == States.AUTH and r.dev.relay, "state %d" % r.state
         assert r.fsm.current_uid == B, "session card %r" % r.fsm.current_uid
@@ -288,6 +295,16 @@ def run():
         r.wait_ms(settings.GRACE_TIMEOUT_MS)
         r.tick(present=False)
         assert r.api.calls('deactivate')[-1] == ('deactivate', B), "events %r" % (r.events,)
+
+    def test_hand_off_releases_when_a_call_raises(r):
+        r.tap(A)
+        r.remove()
+        r.api.raise_on_deactivate = True
+        try:
+            r.tap(B)
+        except OSError:
+            pass
+        assert r.events[-1] == ('release',), "connection kept: %r" % (r.events[-3:],)
 
     def test_refused_hand_off_to_refused_card(r):
         r.tap(A)
@@ -443,6 +460,7 @@ def run():
         ("GRACE tap: user -> AUTH, same session", test_grace_user_answer),
         ("Refused change_card hands off with power on", test_refused_hands_off_with_power),
         ("Hand-off to a refused card: NOAUTH, one deactivate", test_refused_hand_off_to_refused_card),
+        ("Hand-off releases the connection when a call raises", test_hand_off_releases_when_a_call_raises),
         ("Grace runs out during change_card: power off, no activate", test_grace_out_during_change),
         ("Grace runs out during deactivate: power off, no activate", test_grace_out_during_deactivate),
         ("TRAINING ends on the device timeout", test_training_times_out),

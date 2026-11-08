@@ -293,6 +293,56 @@ class DeviceFSM:
         self.trainer_uid = None
         self.trainee_uid = None
 
+    def _other_card_in_grace(self, uid):
+        """A card other than the session's during grace: the server says
+        what it may do."""
+
+        mode = api.change_card(self.current_uid, uid)
+
+        if mode == 'proxy':
+
+            self._set_state(
+                States.PROXY
+            )
+
+        # Known server limit: the server says 'training' for any user card
+        # when the session's user may train, even one authorized on its own,
+        # so a trainer cannot hand off to an authorized user.
+        elif mode == 'training':
+
+            self.trainer_uid = self.current_uid
+            self.trainee_uid = uid
+
+            self._set_state(
+                States.TRAINING
+            )
+
+        elif mode == 'user':
+
+            self._set_state(
+                States.AUTH
+            )
+
+        # Refused, or no answer: hand off. The old session ends and the new
+        # card gets its own; power stays on until the server refuses the new
+        # card. A slow server must not stretch grace: once it runs out, power
+        # off (IDLE).
+        else:
+
+            if self._grace_timeout_expired():
+                self._set_state(States.IDLE)
+                return
+
+            old_uid = self.current_uid
+            self._end_session()
+            api.deactivate(old_uid)
+
+            if self._grace_timeout_expired():
+                self._set_state(States.IDLE)
+                return
+
+            self._start_session(uid)
+
     # =========================================================================
     # FSM Update Logic
     # =========================================================================
@@ -399,49 +449,12 @@ class DeviceFSM:
 
                     return
 
-                # Another card: the server says what it may do.
-                mode = api.change_card(self.current_uid, uid)
-
-                if mode == 'proxy':
-
-                    self._set_state(
-                        States.PROXY
-                    )
-
-                elif mode == 'training':
-
-                    self.trainer_uid = self.current_uid
-                    self.trainee_uid = uid
-
-                    self._set_state(
-                        States.TRAINING
-                    )
-
-                elif mode == 'user':
-
-                    self._set_state(
-                        States.AUTH
-                    )
-
-                # Refused, or no answer: hand off. The old session ends and
-                # the new card gets its own; power stays on until the
-                # server refuses the new card. A slow server must not
-                # stretch grace: once it runs out, power off (IDLE).
-                else:
-
-                    if self._grace_timeout_expired():
-                        self._set_state(States.IDLE)
-                        return
-
-                    old_uid = self.current_uid
-                    self._end_session()
-                    api.deactivate(old_uid)
-
-                    if self._grace_timeout_expired():
-                        self._set_state(States.IDLE)
-                        return
-
-                    self._start_session(uid)
+                # Another card: up to three server calls, on one connection.
+                api.hold()
+                try:
+                    self._other_card_in_grace(uid)
+                finally:
+                    api.release()
 
         # =========================================================
         # PROXY
