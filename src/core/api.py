@@ -169,15 +169,3 @@ def startup():
     if not _ok('startup', reply):
         return 'error'
     return 'ok'
-
-
-# The FSM's old calls, answered by the test cards until fsm.py moves to the
-# calls above.
-is_auth = api_mock.is_auth
-is_trainer = api_mock.is_trainer
-is_proxy = api_mock.is_proxy
-log_session_start = api_mock.log_session_start
-log_session_end = api_mock.log_session_end
-log_session_fail = api_mock.log_session_fail
-log_training_start = api_mock.log_training_start
-log_proxy_start = api_mock.log_proxy_start

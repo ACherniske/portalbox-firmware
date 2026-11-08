@@ -312,16 +312,6 @@ def run():
                 assert logs, "%r not logged" % text
             _with(check, config=text)
 
-    def test_old_names_still_answer():
-        # Until Task 3 moves fsm.py to the new calls.
-        assert api.is_auth(USER) is True
-        assert api.is_trainer(TRAINER) is True
-        assert api.is_proxy(PROXY) is True
-        assert api.is_auth(NOAUTH) is False
-        for name in ('log_session_start', 'log_session_end', 'log_session_fail',
-                     'log_training_start', 'log_proxy_start'):
-            assert callable(getattr(api, name)), name
-
     runner.run_test("card_id: hex uid -> decimal", test_card_id_decimal)
     runner.run_test("card_id: bad uid -> None", test_card_id_bad)
     runner.run_test("mac: 12 lowercase hex", test_mac)
@@ -344,7 +334,6 @@ def run():
     runner.run_test("Config url '' uses the mock", test_empty_url_uses_mock)
     runner.run_test("No config file: refuse every card", test_no_config_refuses)
     runner.run_test("Bad config file: refuse every card", test_bad_config_refuses)
-    runner.run_test("Old FSM calls still answer", test_old_names_still_answer)
     runner.final_report()
 
 

@@ -11,7 +11,7 @@ from core.device import get_device
 from core.feedback import apply_feedback
 from config import settings
 
-# Mock API layer
+# Maker Portal server (or the test cards when the box config says so)
 from core import api
 
 
@@ -40,6 +40,10 @@ STATE_NAMES = {
 # idle_ms() stops growing here (1 day): well past the 10 idle minutes an
 # update check needs, well short of the ~6.2-day ticks wrap.
 IDLE_MS_CAP = 24 * 3600 * 1000
+
+# Longest session timeout ticks_diff can measure (2**29 ms, ~6.2 days), less
+# an hour so a slow poll can't step past it. Longer server timeouts end here.
+SESSION_TIMEOUT_CAP_MS = (1 << 29) - 3600 * 1000
 
 # States in which the relay should be energized (equipment powered).
 # This is an authorization decision the FSM owns directly — unlike
@@ -72,8 +76,12 @@ class DeviceFSM:
 
         self.state = States.IDLE
 
-        # Main authenticated user
+        # The card that started the server session (None: no session)
         self.current_uid = None
+
+        # That session's timeout in ms from the server: 0 = no limit,
+        # None = settings.DEVICE_TIMEOUT_MS
+        self.session_timeout_ms = None
 
         # The card whose tap started the current state (the one in the reader)
         self.card_uid = None
@@ -117,15 +125,15 @@ class DeviceFSM:
         # EXIT / CLEANUP EVENTS
         # =========================================================
 
+        # Power going off ends the server session (once).
         ended_uid = None
 
-        if new_state == States.IDLE:
+        if old_state in _RELAY_ON_STATES and new_state not in _RELAY_ON_STATES:
             ended_uid = self.current_uid
+            self._end_session()
 
-            self.current_uid = None
+        if new_state == States.IDLE:
             self.card_uid = None
-            self.trainer_uid = None
-            self.trainee_uid = None
 
         # =========================================================
         # APPLY NEW STATE
@@ -140,10 +148,10 @@ class DeviceFSM:
 
         self._apply_state()
 
-        # Log only after the relay is off: a slow or failing server call
-        # must never keep the tool powered.
+        # Tell the server only after the relay is off: a slow or failing
+        # server call must never keep the tool powered.
         if ended_uid:
-            api.log_session_end(ended_uid)
+            api.deactivate(ended_uid)
 
     def _state_elapsed(self):
         """Get milliseconds elapsed since entering current state."""
@@ -171,15 +179,22 @@ class DeviceFSM:
     def _device_timeout_expired(self):
         """Check if device timeout has expired."""
 
-        device_timeout_ms = getattr(
-            settings,
-            'DEVICE_TIMEOUT_MS',
-            getattr(settings, 'device_timeout_ms', 0)
-        )
+        device_timeout_ms = self.session_timeout_ms
+
+        # The server's 0 means no limit.
+        if device_timeout_ms == 0:
+            return False
+
+        if device_timeout_ms is None:
+            device_timeout_ms = getattr(
+                settings,
+                'DEVICE_TIMEOUT_MS',
+                getattr(settings, 'device_timeout_ms', 0)
+            )
 
         return (
             self._state_elapsed()
-            >= device_timeout_ms
+            >= min(device_timeout_ms, SESSION_TIMEOUT_CAP_MS)
         )
 
     def _grace_timeout_expired(self):
@@ -255,23 +270,28 @@ class DeviceFSM:
         return self.device.card_present()
 
     # =========================================================================
-    # API Hooks
+    # Server Sessions
     # =========================================================================
 
-    def _is_auth(self, uid):
-        """Check if UID is authorized."""
+    def _start_session(self, uid):
+        """Ask the server to start a session for the card: AUTH or NOAUTH."""
 
-        return api.is_auth(uid)
+        ok, timeout_ms = api.activate(uid)
 
-    def _is_trainer(self, uid):
-        """Check if UID is trainer card."""
+        if ok:
+            self.current_uid = uid
+            self.session_timeout_ms = timeout_ms
+            self._set_state(States.AUTH)
+        else:
+            self._set_state(States.NOAUTH)
 
-        return api.is_trainer(uid)
+    def _end_session(self):
+        """Forget the session; the caller tells the server."""
 
-    def _is_proxy(self, uid):
-        """Check if UID is proxy card."""
-
-        return api.is_proxy(uid)
+        self.current_uid = None
+        self.session_timeout_ms = None
+        self.trainer_uid = None
+        self.trainee_uid = None
 
     # =========================================================================
     # FSM Update Logic
@@ -302,31 +322,7 @@ class DeviceFSM:
 
                 self.card_uid = uid
 
-                # -------------------------------------------------
-                # Authorized User
-                # -------------------------------------------------
-
-                if self._is_auth(uid):
-
-                    self.current_uid = uid
-
-                    api.log_session_start(uid)
-
-                    self._set_state(
-                        States.AUTH
-                    )
-
-                # -------------------------------------------------
-                # Unauthorized User
-                # -------------------------------------------------
-
-                else:
-
-                    api.log_session_fail(uid)
-
-                    self._set_state(
-                        States.NOAUTH
-                    )
+                self._start_session(uid)
 
         # =========================================================
         # AUTH
@@ -394,99 +390,58 @@ class DeviceFSM:
 
                 self.card_uid = uid
 
-                # =================================================
-                # TRAINING FLOW
-                #
-                # Trainer authenticates first:
-                #
-                # Trainer card -> AUTH
-                # Remove card -> GRACE
-                # Trainee card -> TRAINING
-                # =================================================
+                # The card that started the session: resume, no server call.
+                if uid == self.current_uid:
 
-                if (
-                    self.current_uid
-                    and self._is_trainer(self.current_uid)
-                ):
-
-                    # Trainer tapped again: resume existing trainer session.
-                    if uid == self.current_uid:
-
-                        self._set_state(
-                            States.AUTH
-                        )
-
-                    # Another authorized user tapped: hand off session.
-                    elif self._is_auth(uid):
-
-                        api.log_session_end(
-                            self.current_uid
-                        )
-
-                        self.current_uid = uid
-
-                        api.log_session_start(uid)
-
-                        self._set_state(
-                            States.AUTH
-                        )
-
-                    # Non-authorized card while trainer is active: training flow.
-                    else:
-
-                        self.trainer_uid = self.current_uid
-
-                        self.trainee_uid = uid
-
-                        api.log_training_start(
-                            self.trainer_uid,
-                            self.trainee_uid
-                        )
-
-                        self._set_state(
-                            States.TRAINING
-                        )
-
-                # =================================================
-                # PROXY FLOW
-                # =================================================
-
-                elif self._is_proxy(uid):
-
-                    api.log_proxy_start(
-                        uid,
-                        self.current_uid
+                    self._set_state(
+                        States.AUTH
                     )
+
+                    return
+
+                # Another card: the server says what it may do.
+                mode = api.change_card(self.current_uid, uid)
+
+                if mode == 'proxy':
 
                     self._set_state(
                         States.PROXY
                     )
 
-                # =================================================
-                # NORMAL AUTH FLOW
-                # =================================================
+                elif mode == 'training':
 
-                elif self._is_auth(uid):
-                    if self.current_uid and uid != self.current_uid:
-                        api.log_session_end(self.current_uid)
-                        api.log_session_start(uid)
-                    elif not self.current_uid:
-                        api.log_session_start(uid)
-
-                    self.current_uid = uid
-                    self._set_state(States.AUTH)
-
-                # =================================================
-                # UNAUTHORIZED
-                # =================================================
-
-                else:
-
-                    api.log_session_fail(uid)
+                    self.trainer_uid = self.current_uid
+                    self.trainee_uid = uid
 
                     self._set_state(
-                        States.NOAUTH
+                        States.TRAINING
                     )
+
+                elif mode == 'user':
+
+                    self._set_state(
+                        States.AUTH
+                    )
+
+                # Refused, or no answer: hand off. The old session ends and
+                # the new card gets its own; power stays on until the
+                # server refuses the new card. A slow server must not
+                # stretch grace: once it runs out, power off (IDLE).
+                else:
+
+                    if self._grace_timeout_expired():
+                        self._set_state(States.IDLE)
+                        return
+
+                    old_uid = self.current_uid
+                    self._end_session()
+                    api.deactivate(old_uid)
+
+                    if self._grace_timeout_expired():
+                        self._set_state(States.IDLE)
+                        return
+
+                    self._start_session(uid)
 
         # =========================================================
         # PROXY
