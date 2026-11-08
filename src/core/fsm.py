@@ -52,6 +52,13 @@ _RELAY_ON_STATES = (
     States.TRAINING
 )
 
+# States with a card in the reader that holds the session.
+_SESSION_STATES = (
+    States.AUTH,
+    States.PROXY,
+    States.TRAINING
+)
+
 
 class DeviceFSM:
     """
@@ -67,6 +74,9 @@ class DeviceFSM:
 
         # Main authenticated user
         self.current_uid = None
+
+        # The card whose tap started the current state (the one in the reader)
+        self.card_uid = None
 
         # Training session data
         self.trainer_uid = None
@@ -107,11 +117,13 @@ class DeviceFSM:
         # EXIT / CLEANUP EVENTS
         # =========================================================
 
+        ended_uid = None
+
         if new_state == States.IDLE:
-            if self.current_uid:
-                api.log_session_end(self.current_uid)
+            ended_uid = self.current_uid
 
             self.current_uid = None
+            self.card_uid = None
             self.trainer_uid = None
             self.trainee_uid = None
 
@@ -127,6 +139,11 @@ class DeviceFSM:
         self._card_absent_polls = 0
 
         self._apply_state()
+
+        # Log only after the relay is off: a slow or failing server call
+        # must never keep the tool powered.
+        if ended_uid:
+            api.log_session_end(ended_uid)
 
     def _state_elapsed(self):
         """Get milliseconds elapsed since entering current state."""
@@ -266,6 +283,13 @@ class DeviceFSM:
         uid = self._read_card()
         card_present = self._card_present()
 
+        # A different card during a session: the session card left and a new
+        # one came in faster than the removal debounce. Handle it as a tap
+        # during grace, in this same poll (GRACE branch below).
+        if uid and self.state in _SESSION_STATES and uid != self.card_uid:
+            print(f"[FSM] Card swapped during session: {uid}")
+            self._set_state(States.GRACE)
+
         # =========================================================
         # IDLE
         # =========================================================
@@ -275,6 +299,8 @@ class DeviceFSM:
             if uid:
 
                 print(f"[FSM] Card detected: {uid}")
+
+                self.card_uid = uid
 
                 # -------------------------------------------------
                 # Authorized User
@@ -365,6 +391,8 @@ class DeviceFSM:
             elif uid:
 
                 print(f"[FSM] Grace card detected: {uid}")
+
+                self.card_uid = uid
 
                 # =================================================
                 # TRAINING FLOW
@@ -488,6 +516,12 @@ class DeviceFSM:
 
                 self._set_state(
                     States.IDLE
+                )
+
+            elif self._device_timeout_expired():
+
+                self._set_state(
+                    States.TIMEOUT
                 )
 
         # =========================================================
