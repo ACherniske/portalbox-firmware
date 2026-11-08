@@ -1,4 +1,5 @@
 import esp32
+import gc
 import network
 import time
 
@@ -452,6 +453,11 @@ class WifiManager:
         # after power-on. Move it up to the floor before any login attempt.
         if clock.apply_floor():
             self._log(f"[WiFi] Clock was behind; set to floor {time.localtime()[:3]}")
+
+        # The WPA2-Enterprise login needs ESP-IDF RAM; a fragmented MicroPython
+        # heap that grows mid-login takes it ('WiFi Out of Memory'). Collect
+        # first, so a reconnect while the app runs starts like the one at boot.
+        gc.collect()
 
         # Free RAM before each login: too little makes the login stall
         # silently, so the log shows it when a box can't connect. The event

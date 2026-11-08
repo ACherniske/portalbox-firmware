@@ -137,6 +137,27 @@ def run():
         free, largest = lines[0][len('connect, ram '):].split('/')
         assert int(free) > 0 and int(largest) > 0, "line %r" % lines[0]
 
+    def test_connect_collects_before_login():
+        # A heap that grows during the login takes the RAM it needs: free
+        # the heap before each nic.connect(), retries included.
+        events = []
+
+        class _GC:
+            def collect(self):
+                events.append('gc')
+
+        saved = getattr(wifi, 'gc', None)
+        wifi.gc = _GC()
+        try:
+            mgr = _manager([1001, 1010, 1001, 1010], pre=None)
+            mgr.nic.connect = lambda ssid, **kw: events.append('connect')
+            mgr.connect('password123', skip_init=True)
+            mgr.connect('password123', skip_init=True)
+        finally:
+            wifi.gc = saved
+            _stop_autosave()
+        assert events == ['gc', 'connect', 'gc', 'connect'], "events %r" % (events,)
+
     def test_every_status_named():
         for name in dir(NetworkStatus):
             if name.startswith('_'):
@@ -156,6 +177,7 @@ def run():
     runner.run_test("connect() records the pre-connect code", test_connect_records_pre_status)
     runner.run_test("Every status code has a name", test_every_status_named)
     runner.run_test("Connect logs free RAM", test_connect_logs_free_ram)
+    runner.run_test("Connect frees the heap before each login", test_connect_collects_before_login)
 
     _stop_autosave()
     runner.final_report()
