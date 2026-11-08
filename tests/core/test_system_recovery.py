@@ -282,6 +282,12 @@ def run():
             await asyncio.sleep_ms(50)
 
         rec = fake_app(fsm_run)
+
+        class WorkingDevice(_Anything):
+            def get_status(self):
+                return {'rfid': True, 'relay': True}
+
+        patch.set(app_main, 'get_device', lambda: WorkingDevice())
         assert app_main.HEALTHY_AFTER_S == 60, "HEALTHY_AFTER_S %r" % app_main.HEALTHY_AFTER_S
         asyncio.run(app_main.Application().run())
         assert len(rec['healthy']) == 1, "fsm.run calls %r" % (rec['healthy'],)

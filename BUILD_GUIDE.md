@@ -3,7 +3,7 @@
 Complete step-by-step guide to build Micropython firmware with WPA2 Enterprise Wifi.
 
 ## Hardware
-- ESP32-S3 development board 
+- ESP32-S3 development board with quad PSRAM (`R2`, e.g. N8R2) or no PSRAM. Not octal PSRAM (`R8`): it uses GPIO35-37, which the card reader needs (see README).
 - USB cable for flashing
 
 ## Step 1: Install ESP-IDF v5.5.1

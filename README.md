@@ -106,6 +106,11 @@ an update's HTTPS connection uses most of it. If WiFi drops during an update,
 the box cannot log in again until the update stops: the update fails (nothing
 is installed), WiFi comes back by itself, and the box tries again an hour later.
 
-Boxes built on a module with PSRAM (for example an ESP32-S3 with 8 MB of octal
-PSRAM, firmware built with `BOARD_VARIANT=SPIRAM_OCT`) have room to spare and
-log in again in the middle of an update.
+Boxes built on a module with PSRAM have room to spare and log in again in the
+middle of an update. Use a module with **quad** PSRAM (`R2` in the name, for
+example ESP32-S3 N8R2) or none. The normal firmware build (`make
+BOARD=ESP32_GENERIC_S3`) supports quad PSRAM and also runs without it.
+
+Do not use modules with **octal** PSRAM (`R8`, for example N8R8 or N16R8):
+octal PSRAM uses GPIO35-37, and the card reader's SPI bus is on GPIO36 and
+GPIO37 (`config/pins.py`), so the box could never read a card.

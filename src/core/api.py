@@ -127,7 +127,8 @@ def is_auth(uid):
     if not user:
         return False
 
-    return user.get('auth', False)
+    # Only a real True grants it: a reply's "false" or 1 must not.
+    return user.get('auth') is True
 
 
 def is_trainer(uid):
@@ -145,7 +146,8 @@ def is_trainer(uid):
     if not user:
         return False
 
-    return user.get('trainer', False)
+    # Only a real True grants it: a reply's "false" or 1 must not.
+    return user.get('trainer') is True
 
 def is_proxy(uid):
     """
@@ -162,7 +164,8 @@ def is_proxy(uid):
     if not user:
         return False
 
-    return user.get('proxy', False)
+    # Only a real True grants it: a reply's "false" or 1 must not.
+    return user.get('proxy') is True
 
 
 # ============================================================================

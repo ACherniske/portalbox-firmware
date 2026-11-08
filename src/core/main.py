@@ -6,6 +6,7 @@ import sys
 import uasyncio as asyncio
 
 import recovery
+import core.device as device_mod
 from core.device import get_device, cleanup_device
 from core.fsm import DeviceFSM
 
@@ -14,10 +15,8 @@ from core.fsm import DeviceFSM
 # count is cleared and a trial OTA version is committed.
 HEALTHY_AFTER_S = 60
 
-
-def _healthy():
-    recovery.mark_healthy()
-    print("[APP] Healthy: crash count cleared")
+# Without these the box can't do its job, so the run is not healthy.
+_NEEDED_HARDWARE = ('rfid', 'relay')
 
 
 class Application:
@@ -79,7 +78,7 @@ class Application:
             asyncio.create_task(self._ota_loop())
 
             print("[APP] Starting FSM...")
-            await self.fsm.run(mark_healthy=_healthy,
+            await self.fsm.run(mark_healthy=self._healthy,
                                healthy_after_ms=HEALTHY_AFTER_S * 1000)
 
         except KeyboardInterrupt:
@@ -102,6 +101,19 @@ class Application:
         finally:
 
             await self.shutdown()
+
+    def _healthy(self):
+        """Clear the crash count and commit a trial version, but only when
+        the card reader and relay started: a version that breaks them must
+        not be kept."""
+        status = self.device.get_status()
+        failed = [name for name in _NEEDED_HARDWARE if not status.get(name)]
+        if failed:
+            recovery.log('app', 'not healthy: %s failed' % ', '.join(failed))
+            print("[APP] Not healthy: %s failed" % ', '.join(failed))
+            return
+        recovery.mark_healthy()
+        print("[APP] Healthy: crash count cleared")
 
     # =========================================================================
     # Idle update check
@@ -127,7 +139,13 @@ class Application:
         while self.running:
             await asyncio.sleep_ms(every_ms)
             if self.running:
-                self._ota_check()
+                # uasyncio drops a task's exception silently: without this,
+                # one failed check would end idle updates until the next boot.
+                try:
+                    self._ota_check()
+                except Exception as e:
+                    recovery.log('ota', 'idle check failed: %r' % (e,))
+                    print("[APP] OTA idle check failed: %r" % (e,))
 
     # =========================================================================
     # Shutdown
@@ -182,8 +200,23 @@ def main():
 
     finally:
 
+        _power_off()
+
         # Ensure asyncio event loop fully exits
         asyncio.new_event_loop()
+
+
+def _power_off():
+    """Relays off, whatever stopped the app. A Ctrl-C that lands between
+    tasks skips Application.shutdown(). Never starts the hardware: if
+    shutdown already cleaned up, there is nothing to do."""
+    device = device_mod._device
+    if device is None:
+        return
+    try:
+        device.relays_off()
+    finally:
+        cleanup_device()
 
 
 # Run automatically if executed directly

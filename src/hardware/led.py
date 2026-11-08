@@ -52,6 +52,11 @@ class LEDController:
         self._current_task = None
         self._animation_running = False
 
+        # Brightness the driver started with. A pulse changes the driver's
+        # brightness; stop() puts this back so what comes next (the grace
+        # warning, an error color) is not left dim.
+        self._base_brightness = getattr(driver, 'brightness', None)
+
     @property
     def brightness(self):
         """Get current brightness."""
@@ -108,6 +113,8 @@ class LEDController:
             self._current_task.cancel()
             self._current_task = None
         self._animation_running = False
+        if self._base_brightness is not None:
+            self.driver.brightness = self._base_brightness
 
     def fill(self, color):
         """
