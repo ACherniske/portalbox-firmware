@@ -216,6 +216,188 @@ def test_live_refusal_over_verified_tls():
     assert status == 401, 'status %r body %r' % (status, body)
 
 
+# --- Session.request: one kept connection for a run of calls ----------------
+
+class _KeptConn:
+    """One TLS connection: serves `replies` in order, one per request; after
+    `close_after` replies it reads as closed by the server (b'').
+    requests: [request line, headers dict, body bytes]."""
+
+    def __init__(self, host, timeout_s, replies, close_after):
+        self.host = host
+        self.timeout_s = timeout_s
+        self.replies = list(replies)
+        self.close_after = close_after
+        self.requests = []
+        self.buf = io.BytesIO(b'')
+        self.closed = False
+
+    def write(self, data):
+        text = bytes(data).decode()
+        first = text.split('\r\n', 1)[0]
+        if ' HTTP/1.' not in first:   # a body after its head
+            self.requests[-1][2] += bytes(data)
+            return len(data)
+        hdrs = {}
+        for line in text.split('\r\n')[1:]:
+            if line:
+                k, _, v = line.partition(':')
+                hdrs[k.strip()] = v.strip()
+        self.requests.append([first, hdrs, b''])
+        served = len(self.requests) - 1
+        if self.replies and (self.close_after is None or served < self.close_after):
+            self.buf = io.BytesIO(self.replies.pop(0))
+        else:
+            self.buf = io.BytesIO(b'')
+        return len(data)
+
+    def readline(self):
+        return self.buf.readline()
+
+    def read(self, n):
+        return self.buf.read(n)
+
+    def close(self):
+        self.closed = True
+
+
+class _Connector:
+    """Stands in for https._connect: hands out the next _KeptConn from
+    `plan` (lists of replies, or (replies, close_after))."""
+
+    def __init__(self, plan):
+        self.plan = list(plan)
+        self.made = []
+
+    def __call__(self, host, timeout_s=None):
+        spec = self.plan.pop(0)
+        replies, close_after = spec if isinstance(spec, tuple) else (spec, None)
+        conn = _KeptConn(host, timeout_s, replies, close_after)
+        self.made.append(conn)
+        return conn
+
+
+def _with_kept(plan, fn):
+    saved = (https._connect, recovery.feed)
+    fake = _Connector(plan)
+    https._connect = fake
+    recovery.feed = lambda: None
+    s = https.Session()
+    try:
+        return fn(s, fake)
+    finally:
+        s.close()
+        https._connect, recovery.feed = saved
+
+
+def _r(status, body=b'', extra=''):
+    head = 'HTTP/1.1 %d X\r\n%sContent-Length: %d\r\n\r\n' % (status, extra, len(body))
+    return head.encode() + body
+
+
+def _raises(fn):
+    try:
+        fn()
+    except (OSError, HttpError):
+        return True
+    return False
+
+
+URL = 'https://portal.example/api/v2/box-activation.php?mac=ab12'
+LINE = '/api/v2/box-activation.php?mac=ab12 HTTP/1.1'
+
+
+def test_session_request_reuses_connection():
+    def run(s, fake):
+        assert s.request('POST', URL, {'Authorization': 'Bearer 1'}, '{"card": 2}') == (403, b'no')
+        assert s.request('POST', URL, body=b'{"card": 3}') == (200, b'training')
+        assert s.request('DELETE', URL) == (200, b'')
+        assert len(fake.made) == 1, '%d connections' % len(fake.made)
+        lines = [r[0] for r in fake.made[0].requests]
+        assert lines == ['POST ' + LINE, 'POST ' + LINE, 'DELETE ' + LINE], lines
+        first = fake.made[0].requests[0]
+        assert first[1].get('Authorization') == 'Bearer 1', first[1]
+        assert first[1].get('Host') == 'portal.example', first[1]
+        assert first[1].get('Content-Length') == '11' and first[2] == b'{"card": 2}', first
+        last = fake.made[0].requests[2]
+        assert last[1].get('Content-Length') == '0', last
+    _with_kept([[_r(403, b'no'), _r(200, b'training'), _r(200)]], run)
+
+
+def test_session_request_not_resent():
+    """A request that fails on a reused connection may have reached the
+    server: it is not sent again. The next call reconnects."""
+    def run(s, fake):
+        assert s.request('PUT', URL) == (200, b'')
+        assert _raises(lambda: s.request('PUT', URL)), 'failed request did not raise'
+        assert len(fake.made) == 1, 'request sent again on a new connection'
+        assert fake.made[0].closed, 'dead connection kept'
+        assert s.request('DELETE', URL) == (200, b'')
+        assert len(fake.made) == 2, '%d connections' % len(fake.made)
+    _with_kept([([_r(200)], 1), [_r(200)]], run)
+
+
+def test_session_request_timeout():
+    def run(s, fake):
+        s.request('PUT', URL, timeout_s=5)
+        assert fake.made[0].timeout_s == 5, fake.made[0].timeout_s
+    _with_kept([[_r(200)]], run)
+
+
+def test_session_request_honours_close():
+    def run(s, fake):
+        assert s.request('PUT', URL) == (200, b'')
+        assert fake.made[0].closed, 'kept a connection the server closes'
+        s.request('DELETE', URL)
+        assert len(fake.made) == 2, '%d connections' % len(fake.made)
+    _with_kept([[_r(200, b'', 'Connection: close\r\n')], [_r(200)]], run)
+
+
+def test_session_request_chunked_refused():
+    def run(s, fake):
+        try:
+            s.request('PUT', URL)
+        except HttpError as e:
+            assert e.status == 0, e.status
+        else:
+            raise AssertionError('chunked reply accepted')
+        assert fake.made[0].closed, 'connection kept after a chunked reply'
+    chunked = b'HTTP/1.1 200 X\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n'
+    _with_kept([[chunked]], run)
+
+
+def test_session_request_over_max_closes():
+    def run(s, fake):
+        assert _raises(lambda: s.request('PUT', URL, max_bytes=4)), 'body over max accepted'
+        assert fake.made[0].closed, 'connection kept after an error'
+    _with_kept([[_r(200, b'hello')]], run)
+
+
+def test_live_session_one_connection():
+    """Two refused PUTs (no card: 401 before any database access) on one
+    kept connection to the box's server."""
+    url = _live_url()
+    if url is None:
+        print('SKIP (no server in %s) ' % API_CONFIG, end='')
+        return
+    real = https._connect
+    made = [0]
+
+    def counting(host, timeout_s=None):
+        made[0] += 1
+        return real(host, timeout_s)
+    https._connect = counting
+    s = https.Session()
+    try:
+        first = s.request('PUT', url, timeout_s=10)
+        second = s.request('PUT', url, timeout_s=10)
+    finally:
+        s.close()
+        https._connect = real
+    assert first[0] == 401 and second[0] == 401, (first, second)
+    assert made[0] == 1, '%d connections' % made[0]
+
+
 def run():
     from tests.net.wifi_join import join_first
     join_first()
@@ -231,4 +413,11 @@ def run():
     runner.run_test("Watchdog fed through DNS, connect, handshake, head", test_feeds_through_each_step)
     runner.run_test("Plain http refused", test_http_url_refused)
     runner.run_test("Live: server refuses a PUT with no card (401)", test_live_refusal_over_verified_tls)
+    runner.run_test("Session.request reuses one connection", test_session_request_reuses_connection)
+    runner.run_test("Session.request: failure on a reused connection not resent", test_session_request_not_resent)
+    runner.run_test("Session.request: timeout_s reaches the connection", test_session_request_timeout)
+    runner.run_test("Session.request honours Connection: close", test_session_request_honours_close)
+    runner.run_test("Session.request refuses chunked replies", test_session_request_chunked_refused)
+    runner.run_test("Session.request: body over max closes", test_session_request_over_max_closes)
+    runner.run_test("Live: two calls on one kept connection", test_live_session_one_connection)
     runner.final_report()

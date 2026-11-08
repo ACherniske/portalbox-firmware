@@ -210,6 +210,14 @@ def get_json(url, headers=None, max_bytes=65536):
     return _get(url, headers, lambda stream, reply: json.load(_JsonBody(stream, reply, max_bytes)))
 
 
+def _body_bytes(body):
+    if body is None:
+        return b''
+    if isinstance(body, str):
+        return body.encode()
+    return body
+
+
 def request(method, url, headers=None, body=None, max_bytes=4096, timeout_s=None):
     """Send one request (PUT, POST, DELETE...) and return (status, body bytes).
 
@@ -220,10 +228,7 @@ def request(method, url, headers=None, body=None, max_bytes=4096, timeout_s=None
     max_bytes or shorter than Content-Length -> HttpError(0).
     """
     host, path = _split(url)
-    if body is None:
-        body = b''
-    elif isinstance(body, str):
-        body = body.encode()
+    body = _body_bytes(body)
     sent = {'User-Agent': USER_AGENT, 'Content-Length': str(len(body))}
     sent.update(headers or {})
     recovery.feed()
@@ -289,23 +294,51 @@ class Session:
         self.stream = None
         self.host = None
 
-    def _send(self, host, path, headers):
+    def request(self, method, url, headers=None, body=None, max_bytes=4096, timeout_s=None):
+        """Like https.request(), on the kept connection.
+
+        A request that fails on a reused connection is not sent again: it
+        may have reached the server. It raises like any network error, and
+        the next call opens a new connection.
+        """
+        host, path = _split(url)
+        body = _body_bytes(body)
+        sent = {'User-Agent': USER_AGENT, 'Content-Length': str(len(body))}
+        sent.update(headers or {})
+        recovery.feed()
+        try:
+            status, reply = self._send(host, path, sent, method, body, timeout_s, resend=False)
+            if 'chunked' in reply.get('transfer-encoding', '').lower():
+                raise HttpError(0, 'chunked reply')
+            data = _read_body(self.stream, reply, None, max_bytes)
+        except BaseException:
+            self.close()
+            raise
+        self._close_if_done(reply)
+        return status, data
+
+    def _close_if_done(self, reply):
+        if ('content-length' not in reply
+                or reply.get('connection', '').lower() == 'close'):
+            self.close()
+
+    def _send(self, host, path, headers, method='GET', body=None, timeout_s=None, resend=True):
         if self.stream is not None and self.host != host:
             self.close()
         reused = self.stream is not None
         if not reused:
-            self.stream = _connect(host)
+            self.stream = _connect(host, timeout_s)
             self.host = host
         try:
-            return _exchange(self.stream, host, path, headers, 'HTTP/1.1')
+            return _exchange(self.stream, host, path, headers, 'HTTP/1.1', method, body)
         except (OSError, HttpError):
             self.close()
-            if not reused:
+            if not reused or not resend:
                 raise
         # The server closed the kept connection while it sat idle.
-        self.stream = _connect(host)
+        self.stream = _connect(host, timeout_s)
         self.host = host
-        return _exchange(self.stream, host, path, headers, 'HTTP/1.1')
+        return _exchange(self.stream, host, path, headers, 'HTTP/1.1', method, body)
 
     def _get(self, url, headers, read):
         sent = {'User-Agent': USER_AGENT}
@@ -329,7 +362,5 @@ class Session:
             except BaseException:
                 self.close()
                 raise
-            if ('content-length' not in reply
-                    or reply.get('connection', '').lower() == 'close'):
-                self.close()
+            self._close_if_done(reply)
             return result

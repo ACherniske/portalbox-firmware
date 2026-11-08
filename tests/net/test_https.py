@@ -533,7 +533,7 @@ class FakeConnector:
         self.plan = list(conns)
         self.made = []
 
-    def __call__(self, host):
+    def __call__(self, host, timeout_s=None):
         spec = self.plan.pop(0)
         replies, close_after = spec if isinstance(spec, tuple) else (spec, None)
         conn = FakeConn(host, replies, close_after)
