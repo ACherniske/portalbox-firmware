@@ -32,6 +32,22 @@ def _release():
 FAIL_POLLS = 3
 
 
+def _strongest_bssid(networks, ssid):
+    """BSSID of the strongest AP in WLAN.scan() results named ssid, or None.
+    The driver's own scan joins the first matching AP it hears, which can be
+    a weak one that logs in but never hands out an IP."""
+    want = ssid.encode() if isinstance(ssid, str) else ssid
+    best = None
+    for name, bssid, _channel, rssi, _security, _hidden in networks:
+        if name == want and (best is None or rssi > best[1]):
+            best = (bssid, rssi)
+    return best[0] if best else None
+
+
+def _mac(bssid):
+    return ':'.join('%02x' % b for b in bssid)
+
+
 def _sleep_fed(seconds):
     """Sleep in 1 s steps, feeding the watchdog so a long wait never trips it."""
     for _ in range(int(seconds)):
@@ -86,6 +102,8 @@ class WifiManager:
         # may be left over from the previous attempt.
         self._pre_status = None
         self._ram_logged = False
+        # BSSID for this attempt: the config's, or the strongest AP scanned.
+        self._bssid = None
 
         print("[WiFi] Manager initialized")
 
@@ -167,9 +185,8 @@ class WifiManager:
                 'password': password,
             }
 
-            if self.config.bssid:
-                connect_params['bssid'] = self.config.bssid
-                self._log(f"[WiFi] Restricting to BSSID: {self.config.bssid}")
+            if self._bssid:
+                connect_params['bssid'] = self._bssid
 
             self.nic.connect(self.config.ssid, **connect_params)
             self._log("[WiFi] Connection initiated")
@@ -204,8 +221,8 @@ class WifiManager:
                 'ca_cert': cert_content,
             }
 
-            if self.config.bssid:
-                connect_params['bssid'] = self.config.bssid
+            if self._bssid:
+                connect_params['bssid'] = self._bssid
 
             _hold(cert_content)
             self.nic.connect(self.config.ssid, **connect_params)
@@ -244,8 +261,8 @@ class WifiManager:
                 'ttls_phase2_method': self.config.ttls_phase2_method,
             }
 
-            if self.config.bssid:
-                connect_params['bssid'] = self.config.bssid
+            if self._bssid:
+                connect_params['bssid'] = self._bssid
 
             _hold(cert_content)
             self.nic.connect(self.config.ssid, **connect_params)
@@ -299,8 +316,8 @@ class WifiManager:
             if private_key_password:
                 connect_params['private_key_password'] = private_key_password
 
-            if self.config.bssid:
-                connect_params['bssid'] = self.config.bssid
+            if self._bssid:
+                connect_params['bssid'] = self._bssid
 
             _hold(client_cert, private_key, private_key_password)
             self.nic.connect(self.config.ssid, **connect_params)
@@ -326,9 +343,8 @@ class WifiManager:
         try:
             connect_params = {'key': password}
 
-            if self.config.bssid:
-                connect_params['bssid'] = self.config.bssid
-                self._log(f"[WiFi] Restricting to BSSID: {self.config.bssid}")
+            if self._bssid:
+                connect_params['bssid'] = self._bssid
 
             if self.config.wpa3:
                 connect_params['wpa3'] = True
@@ -446,6 +462,7 @@ class WifiManager:
             recovery.log('wifi', ram)
             self._ram_logged = True
 
+        self._bssid = self._pick_bssid()
         self._pre_status = self.nic.status()
 
         if self.config.network_type == NetworkType.WPA2_ENTERPRISE:
@@ -460,6 +477,28 @@ class WifiManager:
             return False
 
         return self._wait_for_connection()
+
+    def _pick_bssid(self):
+        """The config's BSSID, else the strongest AP for the SSID, else None
+        (the driver then picks). Scans on every attempt, so a retry can move
+        to another AP."""
+        if self.config.bssid:
+            self._log(f"[WiFi] Restricting to BSSID: {self.config.bssid}")
+            return self.config.bssid
+        recovery.feed()
+        try:
+            networks = self.nic.scan()
+        except Exception as e:
+            self._log(f"[WiFi] Scan failed ({e}); letting the driver pick the AP")
+            return None
+        finally:
+            recovery.feed()
+        bssid = _strongest_bssid(networks, self.config.ssid)
+        if bssid is None:
+            self._log(f"[WiFi] {self.config.ssid} not in scan; letting the driver pick the AP")
+        else:
+            self._log(f"[WiFi] Strongest AP: {_mac(bssid)}")
+        return bssid
 
     def connect_with_retry(self, password, private_key_password=None):
         for attempt in range(self.config.retry_attempts):
