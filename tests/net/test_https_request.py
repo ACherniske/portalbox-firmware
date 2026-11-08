@@ -210,14 +210,14 @@ def test_live_refusal_over_verified_tls():
     if url is None:
         print('SKIP (no server in %s) ' % API_CONFIG, end='')
         return
-    from tests.net.test_https import _online
+    from tests.net.wifi_join import _online
     _online()   # joined already by run(); a no-op then
     status, body = https.request('PUT', url, timeout_s=10)
     assert status == 401, 'status %r body %r' % (status, body)
 
 
 def run():
-    from tests.net.test_https import join_first
+    from tests.net.wifi_join import join_first
     join_first()
     runner = TestRunner()
     runner.run_test("PUT without a body: line, Host, header, length 0", test_put_without_body)

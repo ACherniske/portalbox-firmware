@@ -12,6 +12,7 @@ from tests.test_helper import TestRunner
 import recovery
 from net import https
 from net.https import HttpError
+from tests.net.wifi_join import _online, join_first
 
 TOKEN = None
 
@@ -39,27 +40,6 @@ def _token():
 def _auth():
     tok = _token()
     return {'Authorization': 'Bearer ' + tok} if tok else {}
-
-
-def _online():
-    """Connect WiFi and set the clock the way core/system.py does."""
-    import network
-    import time
-    sta = network.WLAN(network.STA_IF)
-    if sta.isconnected() and time.localtime()[0] >= 2025:
-        return
-    from net.models import WiFiConfig
-    from net.wifi import WifiManager
-    config = WiFiConfig()
-    if not config.load():
-        raise Exception('no /config/wifi_config.json')
-    password = config.get_decrypted_password()
-    if not WifiManager(config=config, verbose=False).connect_with_retry(password):
-        raise Exception('WiFi did not connect')
-    from net import clock
-    if clock._autosave_timer is not None:
-        clock._autosave_timer.deinit()
-        clock._autosave_timer = None
 
 
 def _blob_hash(data):
@@ -698,6 +678,7 @@ def test_one_tls_context_for_all_connections():
 
 
 def run():
+    join_first()
     runner = TestRunner()
     runner.run_test("http URL refused", test_http_url_refused)
     runner.run_test("Follows redirect with headers", test_follows_redirect_with_headers)
