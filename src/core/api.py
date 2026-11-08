@@ -65,8 +65,35 @@ def _server(name):
     return url
 
 
+_held = False      # calls share one connection until release()
+_session = None    # that connection, opened by the first call
+
+
+def hold():
+    """Send the next calls on one kept connection, until release().
+
+    A grace tap makes up to three calls in a row; each new TLS handshake
+    costs ~0.8 s on the box.
+    """
+    global _held
+    _held = True
+
+
+def release():
+    """Close the shared connection; later calls each open their own."""
+    global _held, _session
+    _held = False
+    if _session is not None:
+        try:
+            _session.close()
+        except Exception:
+            pass
+        _session = None
+
+
 def _call(name, server, method, path, card=None, body=None, headers=None):
     """Send one request; (status, body bytes), or None after a logged failure."""
+    global _session
     try:
         if not _wlan().isconnected():
             _log(name + ': no wifi')
@@ -78,7 +105,12 @@ def _call(name, server, method, path, card=None, body=None, headers=None):
             sent.update(headers)
         url = server.rstrip('/') + path + '?mac=' + mac()
         from net import https   # loads TLS only once a card is checked
-        return https.request(method, url, sent, body, timeout_s=settings.API_TIMEOUT_S)
+        send = https.request
+        if _held:
+            if _session is None:
+                _session = https.Session()
+            send = _session.request
+        return send(method, url, sent, body, timeout_s=settings.API_TIMEOUT_S)
     except Exception as e:
         _log('%s: %r' % (name, e))
         return None

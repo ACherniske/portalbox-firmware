@@ -312,6 +312,81 @@ def run():
                 assert logs, "%r not logged" % text
             _with(check, config=text)
 
+    # --- hold(): the calls of one tap share one connection ------------------
+
+    class _FakeSession:
+        made = []
+
+        def __init__(self):
+            self.calls = []
+            self.closed = 0
+            self.raises = None
+            _FakeSession.made.append(self)
+
+        def request(self, method, url, headers=None, body=None, max_bytes=4096, timeout_s=None):
+            self.calls.append((method, url, timeout_s))
+            if self.raises:
+                raise self.raises
+            return 200, _equipment(0)
+
+        def close(self):
+            self.closed += 1
+
+    def _with_sessions(check, raises=None):
+        def fn(server, logs):
+            saved = https.Session
+            _FakeSession.made = []
+            https.Session = _FakeSession
+            try:
+                check(server, logs, raises)
+            finally:
+                api.release()
+                https.Session = saved
+        _with(fn)
+
+    def test_hold_shares_one_connection():
+        def check(server, logs, raises):
+            api.hold()
+            api.activate(USER)
+            api.change_card(USER, PROXY)
+            api.deactivate(USER)
+            assert len(_FakeSession.made) == 1, "%d sessions" % len(_FakeSession.made)
+            s = _FakeSession.made[0]
+            assert [c[0] for c in s.calls] == ['PUT', 'POST', 'DELETE'], s.calls
+            assert s.calls[0][1] == ACT and s.calls[0][2] == 5, s.calls[0]
+            assert server.calls == [], "one-shot requests while held: %r" % (server.calls,)
+            api.release()
+            assert s.closed == 1, "closed %d times" % s.closed
+        _with_sessions(check)
+
+    def test_release_ends_sharing():
+        def check(server, logs, raises):
+            api.hold()
+            api.activate(USER)
+            api.release()
+            api.deactivate(USER)
+            assert len(_FakeSession.made) == 1, "%d sessions" % len(_FakeSession.made)
+            assert [c['method'] for c in server.calls] == ['DELETE'], server.calls
+        _with_sessions(check)
+
+    def test_hold_without_calls_opens_nothing():
+        def check(server, logs, raises):
+            api.hold()
+            api.release()
+            assert _FakeSession.made == [], "session opened with no call"
+        _with_sessions(check)
+
+    def test_held_error_refuses():
+        def check(server, logs, raises):
+            api.hold()
+            api.activate(USER)
+            _FakeSession.made[0].raises = OSError(113)
+            assert api.change_card(USER, PROXY) is None, "error not refused"
+            assert logs, "error not logged"
+            api.release()
+            assert _FakeSession.made[0].closed == 1, "not closed after an error"
+        _with_sessions(check)
+
     runner.run_test("card_id: hex uid -> decimal", test_card_id_decimal)
     runner.run_test("card_id: bad uid -> None", test_card_id_bad)
     runner.run_test("mac: 12 lowercase hex", test_mac)
@@ -334,6 +409,10 @@ def run():
     runner.run_test("Config url '' uses the mock", test_empty_url_uses_mock)
     runner.run_test("No config file: refuse every card", test_no_config_refuses)
     runner.run_test("Bad config file: refuse every card", test_bad_config_refuses)
+    runner.run_test("hold(): one connection for the calls of a tap", test_hold_shares_one_connection)
+    runner.run_test("release() ends sharing", test_release_ends_sharing)
+    runner.run_test("hold() with no call opens nothing", test_hold_without_calls_opens_nothing)
+    runner.run_test("Held connection error: refused, logged, closed", test_held_error_refuses)
     runner.final_report()
 
 
