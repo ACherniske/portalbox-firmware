@@ -1,5 +1,5 @@
 from tests.test_helper import TestRunner
-from core import api
+from core import api_mock as api
 
 # Values a JSON reply could carry. Only a real True grants anything.
 TRUE_ONLY = [
