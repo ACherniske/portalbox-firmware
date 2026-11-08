@@ -22,7 +22,10 @@ from net.https import HttpError
 from net.ota_target import OtaError
 
 _API = 'https://api.github.com'
-_RAW = 'https://raw.githubusercontent.com/%s/%s/%s/'
+# Files come from the API by blob sha, as raw bytes: api.github.com's ECC
+# certificate chain needs far less RAM to check than raw.githubusercontent.com's
+# RSA-4096 one, which failed on boxes without PSRAM.
+_RAW_MEDIA = 'application/vnd.github.raw'
 _CONFIG_PATH = '/config/ota_config.json'
 _OTA_STATE_PATH = '/config/ota_state.json'
 _OTA_INTERVAL_SECONDS = 24 * 60 * 60   # wait after a good check
@@ -292,16 +295,25 @@ def _update(cfg, abort, get_json, fetch):
     if state['trial']:
         return 'failed: trial active'   # install() would refuse after the download
     auth = {'Authorization': 'Bearer ' + cfg['token']} if cfg.get('token') else {}
+    session = https.Session()   # one kept connection: one TLS handshake, not one per file
 
     def api_get(path):
-        return json.loads(https.get(_API + path, auth))
+        return session.get_json(_API + path, auth)   # parsed as it arrives
 
-    def raw_get(url, sink):
-        return https.get(url, auth, sink=sink)
+    blobs = _API + '/repos/%s/%s/git/blobs/' % (cfg['user'], cfg['repository'])
+    blob_headers = dict(auth)
+    blob_headers['Accept'] = _RAW_MEDIA
 
-    get_json = get_json or api_get
-    fetch = fetch or raw_get
+    def blob_get(path, sha, sink):
+        return session.get(blobs + sha, blob_headers, sink=sink)
 
+    try:
+        return _apply(cfg, abort, state, get_json or api_get, fetch or blob_get)
+    finally:
+        session.close()
+
+
+def _apply(cfg, abort, state, get_json, fetch):
     target = ota_target.resolve_target(cfg, get_json)
     commit = target['commit']
     if commit in state['bad']:
@@ -318,9 +330,8 @@ def _update(cfg, abort, get_json, fetch):
         state['managed'] = plan['managed']
         recovery.save_state(state)
         return 'up to date'
-    # The commit sha in the URL pins every file to the same version.
-    raw = _RAW % (cfg['user'], cfg['repository'], commit)
-    ota_stage.stage(plan, tree, raw, fetch, abort)
+    # Blob shas from the tree pin every file to the same version.
+    ota_stage.stage(plan, tree, fetch, abort)
     # stage() checks only before each file: a card tapped during the
     # last download must stop the install and its reset too.
     if abort and abort():
@@ -338,8 +349,9 @@ def run_update(cfg, at_boot, abort=None, get_json=None, fetch=None, reset=machin
     between files, or after the last one, stops it before the install. After an install it calls reset(),
     so the box boots the new version on trial. It also resets when a
     failed install left its journal (its rollback failed too), so on_boot
-    finishes the rollback. get_json/fetch default to https.get with the
-    token from cfg (tests pass fakes).
+    finishes the rollback. get_json and fetch default to one
+    https.Session (JSON with get_json, each file's blob with get), with
+    the token from cfg; tests pass fakes.
     """
     journal_before = recovery._exists(recovery.JOURNAL_PATH)
     try:

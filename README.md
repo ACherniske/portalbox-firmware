@@ -14,8 +14,10 @@ A box can update its own code from this GitHub repository.
   minutes), every 60 seconds. After a successful check it waits a day; after a
   failed one, an hour. Putting a card in stops a download.
 - **What it downloads:** only the files in `src/` that differ from the box,
-  over HTTPS with the server certificate checked (`src/certs/github_roots.pem`).
-  Each file is checked against its git hash before anything is installed.
+  from GitHub's API (`api.github.com`) by each file's git hash, over one HTTPS
+  connection with the server certificate checked (`src/certs/github_roots.pem`).
+  Each file is checked against its git hash before anything is installed. A
+  download that drops (network error, server error) is tried once more.
 - **Trial:** the box restarts into the new version. After 60 seconds of the app
   running, the version is kept. If it fails to get there in 3 boots, the box
   goes back to the old version and never installs that one again (unless every
@@ -97,11 +99,13 @@ log says `anchor changed, needs cable`. These files undo bad updates, so a
 broken copy could leave a box that nothing can fix over WiFi. Copy them by cable
 in safe mode. Files in `config/` are per box and are set by the flash tool.
 
-### Known issue: downloads often fail (November 2026)
+### Memory during an update
 
-GitHub's file server (`raw.githubusercontent.com`) now uses a larger Let's Encrypt
-certificate chain, and the box often runs short of memory checking it. The log
-then shows `failed: ValueError` with "The certificate is not correctly signed by
-the trusted CA", or `MBEDTLS_ERR_X509_ALLOC_FAILED`. The box tries again every
-hour; the first download after a boot usually works, but an update with many
-files may not get through. A fix (freeing memory for TLS) is being worked on.
+A box without PSRAM has about 100 KB of system memory for WiFi and HTTPS, and
+an update's HTTPS connection uses most of it. If WiFi drops during an update,
+the box cannot log in again until the update stops: the update fails (nothing
+is installed), WiFi comes back by itself, and the box tries again an hour later.
+
+Boxes built on a module with PSRAM (for example an ESP32-S3 with 8 MB of octal
+PSRAM, firmware built with `BOARD_VARIANT=SPIRAM_OCT`) have room to spare and
+log in again in the middle of an update.
