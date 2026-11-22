@@ -1,4 +1,4 @@
-"""Download an update into the stage folder and check every byte.
+"""Stream a release bundle into the stage folder and check every byte.
 
 Each file goes straight to flash while its git blob SHA-1 is worked out,
 so no file is ever held whole in RAM. Nothing here touches the live files:
@@ -74,28 +74,6 @@ def space_needed(files):
     return total + 2 * block * len(folders) + MARGIN
 
 
-def stage(plan, tree, fetch, abort=None, free_bytes=None):
-    """Download plan['files'] into recovery.STAGE_DIR and check each one.
-
-    fetch(path, sha, sink) streams the file `path` of the tree, git blob
-    `sha`, to sink.write. Raises OtaError for: less free flash than
-    space_needed() ('no space'), abort() true before a file ('aborted'), a size or hash
-    that differs from the tree ('bad hash <path>'), or a manifest path
-    that is not a file in the target tree ('manifest <path> missing').
-    A dropped download (see _transient) is tried once more from the
-    start of that file; fetch's own error ends it the second time.
-    On any error the stage folder is removed and the error re-raised.
-    """
-    try:
-        _stage(plan, tree, fetch, abort, free_bytes)
-    except BaseException:
-        try:
-            recovery._rm_tree(recovery.STAGE_DIR)
-        except OSError:
-            pass   # keep the first error; the next run clears the stage first
-        raise
-
-
 def _transient(e):
     """A dropped download worth one more try: a network error, a server
     error (5xx) or a broken body (HttpError status 0). Not a 404, a bad
@@ -106,50 +84,6 @@ def _transient(e):
     return status is not None and (status == 0 or status >= 500)
 
 
-def _stage(plan, tree, fetch, abort, free_bytes):
-    recovery._rm_tree(recovery.STAGE_DIR)   # leftovers from a cut-off run
-    files = plan['files']
-    if space_needed(files) > (free_space() if free_bytes is None else free_bytes):
-        raise OtaError('no space')
-    for path, sha, size in files:
-        for attempt in (1, 2):
-            if abort and abort():
-                raise OtaError('aborted')
-            dest = recovery.STAGE_DIR + '/' + path
-            recovery._make_parent(dest)
-            with open(dest, 'wb') as f:   # 'wb': a retry starts the file over
-                sink = _Sink(f, path, size)
-                try:
-                    fetch(path, sha, sink)
-                except Exception as e:
-                    if attempt == 2 or not _transient(e):
-                        raise
-                    continue
-            break
-        if sink.count != size or _hex(sink.hash) != sha:
-            raise OtaError('bad hash ' + path)
-    _check_manifest(files, tree)
-
-
-def _check_manifest(files, tree):
-    """Every file the target's manifest lists must be in the target tree."""
-    if any(path == 'manifest.json' for path, _, _ in files):
-        where = recovery.STAGE_DIR + '/manifest.json'
-    else:
-        where = recovery.LIVE_ROOT + '/manifest.json'   # unchanged: same bytes
-    try:
-        with open(where, 'r') as f:
-            listed = json.loads(f.read())
-    except ValueError:
-        raise OtaError('bad manifest')
-    blobs = set(e['path'] for e in tree if e['type'] == 'blob')
-    for entry in listed:
-        path = entry[4:] if entry.startswith('src/') else entry
-        if path not in blobs:
-            raise OtaError('manifest %s missing' % path)
-
-
-# --- release bundle -------------------------------------------------------
 # One JSON header line, then each file's bytes back to back in header order
 # (scripts/build.py writes it):
 #   {"format": 1, "mpy": "6.3", "version": "<tag>", "files": [[path, size, sha], ...]}

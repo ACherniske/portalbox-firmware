@@ -199,14 +199,14 @@ def run():
         _rm_cfg()
         cfg = ota.load_config(CFG_PATH)
         assert cfg['enabled'] is False, "enabled %r with no file" % cfg['enabled']
-        assert cfg['mode'] == 'release', "mode %r" % cfg['mode']
+        assert 'mode' not in cfg and 'branch' not in cfg, "release-only cfg %r" % cfg
 
     def test_config_read():
         try:
             _write_cfg('{"user": "u", "repository": "r", "enabled": true, "mode": "branch"}')
             cfg = ota.load_config(CFG_PATH)
-            assert cfg['enabled'] is True and cfg['mode'] == 'branch', "cfg %r" % cfg
-            assert cfg['branch'] == 'main' and cfg['ignore'] == [], "defaults %r" % cfg
+            assert cfg['enabled'] is True and cfg['ignore'] == [], "cfg %r" % cfg
+            assert 'mode' not in cfg and 'branch' not in cfg, "old keys kept %r" % cfg
             _write_cfg('{"user": "u", "repository": "r", "enabled": "false"}')
             assert ota.load_config(CFG_PATH)['enabled'] is False, "string enabled OTA"
             _write_cfg('{"user": "u", "repository": "r"}')

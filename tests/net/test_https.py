@@ -242,12 +242,11 @@ def test_raw_file_matches_blob_hash():
 
 
 def test_blob_api_gives_raw_bytes():
-    """GitHub's side of the OTA download: the blob API, asked with the media
-    type ota uses, streams the file's bytes (not base64 JSON)."""
-    from net import ota
+    """A 20 KB file streamed from api.github.com to a sink: the blob API,
+    asked for the raw media type, sends the bytes (not base64 JSON)."""
     _online()
     headers = _auth()
-    headers['Accept'] = ota._RAW_MEDIA
+    headers['Accept'] = 'application/vnd.github.raw'
     sink = CountingSink(WIFI_SIZE)
     url = 'https://api.github.com/repos/ACherniske/portalbox-firmware/git/blobs/' + WIFI_HASH
     got = https.get(url, headers=headers, sink=sink)
