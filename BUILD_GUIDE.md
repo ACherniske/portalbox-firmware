@@ -90,6 +90,15 @@ ls mpy-cross/build/mpy-cross
 ./mpy-cross/build/mpy-cross --version
 ```
 
+The box loads precompiled modules made by this mpy-cross. Its `--version` must
+say `mpy v6.3`, the version the firmware loads. `scripts/build.py` and
+`scripts/deploy.py` run it from the `MPY_CROSS` variable (see "Load a box by
+cable" in the README), e.g. from Windows through WSL:
+
+```bash
+export MPY_CROSS="wsl -e $HOME/micropython/mpy-cross/build/mpy-cross"
+```
+
 ## Step 5: Configure ESP-IDF
 ```bash
 # Enter the esp32 port folder

@@ -1,10 +1,11 @@
-"""Download an update into the stage folder and check every byte.
+"""Stream a release bundle into the stage folder and check every byte.
 
 Each file goes straight to flash while its git blob SHA-1 is worked out,
 so no file is ever held whole in RAM. Nothing here touches the live files:
 recovery.install() swaps the staged copies in.
 """
 import os
+import sys
 import json
 import uhashlib as hashlib
 import ubinascii as binascii
@@ -73,28 +74,6 @@ def space_needed(files):
     return total + 2 * block * len(folders) + MARGIN
 
 
-def stage(plan, tree, fetch, abort=None, free_bytes=None):
-    """Download plan['files'] into recovery.STAGE_DIR and check each one.
-
-    fetch(path, sha, sink) streams the file `path` of the tree, git blob
-    `sha`, to sink.write. Raises OtaError for: less free flash than
-    space_needed() ('no space'), abort() true before a file ('aborted'), a size or hash
-    that differs from the tree ('bad hash <path>'), or a manifest path
-    that is not a file in the target tree ('manifest <path> missing').
-    A dropped download (see _transient) is tried once more from the
-    start of that file; fetch's own error ends it the second time.
-    On any error the stage folder is removed and the error re-raised.
-    """
-    try:
-        _stage(plan, tree, fetch, abort, free_bytes)
-    except BaseException:
-        try:
-            recovery._rm_tree(recovery.STAGE_DIR)
-        except OSError:
-            pass   # keep the first error; the next run clears the stage first
-        raise
-
-
 def _transient(e):
     """A dropped download worth one more try: a network error, a server
     error (5xx) or a broken body (HttpError status 0). Not a 404, a bad
@@ -105,44 +84,168 @@ def _transient(e):
     return status is not None and (status == 0 or status >= 500)
 
 
-def _stage(plan, tree, fetch, abort, free_bytes):
-    recovery._rm_tree(recovery.STAGE_DIR)   # leftovers from a cut-off run
-    files = plan['files']
-    if space_needed(files) > (free_space() if free_bytes is None else free_bytes):
-        raise OtaError('no space')
-    for path, sha, size in files:
-        for attempt in (1, 2):
-            if abort and abort():
-                raise OtaError('aborted')
-            dest = recovery.STAGE_DIR + '/' + path
-            recovery._make_parent(dest)
-            with open(dest, 'wb') as f:   # 'wb': a retry starts the file over
-                sink = _Sink(f, path, size)
-                try:
-                    fetch(path, sha, sink)
-                except Exception as e:
-                    if attempt == 2 or not _transient(e):
-                        raise
-                    continue
-            break
-        if sink.count != size or _hex(sink.hash) != sha:
-            raise OtaError('bad hash ' + path)
-    _check_manifest(files, tree)
+# One JSON header line, then each file's bytes back to back in header order
+# (scripts/build.py writes it):
+#   {"format": 1, "mpy": "6.3", "version": "<tag>", "files": [[path, size, sha], ...]}
+
+BUNDLE_FORMAT = 1
+HEADER_MAX = 8192
 
 
-def _check_manifest(files, tree):
-    """Every file the target's manifest lists must be in the target tree."""
-    if any(path == 'manifest.json' for path, _, _ in files):
-        where = recovery.STAGE_DIR + '/manifest.json'
-    else:
-        where = recovery.LIVE_ROOT + '/manifest.json'   # unchanged: same bytes
+def firmware_mpy():
+    """The .mpy version this firmware loads, e.g. '6.3'."""
+    v = sys.implementation._mpy
+    return '%d.%d' % (v & 0xff, (v >> 8) & 3)
+
+
+def parse_header(line):
+    """The bundle's header line -> {'version', 'files': [(path, size, sha)]}.
+
+    OtaError('bad bundle') for anything malformed; OtaError('mpy X, box Y')
+    for modules built for another firmware (they would not import).
+    """
     try:
-        with open(where, 'r') as f:
-            listed = json.loads(f.read())
-    except ValueError:
-        raise OtaError('bad manifest')
-    blobs = set(e['path'] for e in tree if e['type'] == 'blob')
-    for entry in listed:
-        path = entry[4:] if entry.startswith('src/') else entry
-        if path not in blobs:
-            raise OtaError('manifest %s missing' % path)
+        h = json.loads(line)
+        files = []
+        for path, size, sha in h['files']:
+            if not (isinstance(path, str) and isinstance(size, int) and size >= 0
+                    and isinstance(sha, str)):
+                raise ValueError
+            files.append((path, size, sha))
+        ok = h['format'] == BUNDLE_FORMAT and isinstance(h['version'], str)
+    except (ValueError, KeyError, TypeError):
+        raise OtaError('bad bundle')
+    if not ok:
+        raise OtaError('bad bundle')
+    if h.get('mpy') != firmware_mpy():
+        raise OtaError('mpy %s, box %s' % (h.get('mpy'), firmware_mpy()))
+    return {'version': h['version'], 'files': files}
+
+
+class _BundleSink:
+    """Takes the bundle chunk by chunk (sink.write). After the header it asks
+    plan_for(header) for the plan, checks the space, then writes each
+    planned file to the stage folder through _Sink and reads past the rest."""
+
+    def __init__(self, plan_for, abort, free_bytes):
+        self.plan_for = plan_for
+        self.abort = abort
+        self.free_bytes = free_bytes
+        self.head = b''       # header bytes until the newline; None after
+        self.plan = None
+        self.files = []
+        self.keep = {}
+        self.index = 0        # file being read
+        self.left = 0         # its bytes still to come
+        self.f = None
+        self.sink = None
+
+    def write(self, chunk):
+        if self.abort and self.abort():
+            raise OtaError('aborted')
+        if self.head is not None:
+            self.head += chunk
+            end = self.head.find(b'\n')
+            if end < 0 or end >= HEADER_MAX:
+                if end >= HEADER_MAX or len(self.head) > HEADER_MAX:
+                    raise OtaError('bad bundle')
+                return
+            line, chunk = self.head[:end], self.head[end + 1:]
+            self.head = None
+            self._start(parse_header(line))
+        self._body(chunk)
+
+    def _start(self, header):
+        plan = self.plan_for(header)
+        free = free_space() if self.free_bytes is None else self.free_bytes
+        if space_needed(plan['files']) > free:
+            raise OtaError('no space')
+        self.plan = plan
+        self.keep = set(p for p, _, _ in plan['files'])
+        self.files = header['files']
+        self.index = -1
+        self._next()
+
+    def _next(self):
+        """Move to the next file; files of 0 bytes are done at once."""
+        while True:
+            self.index += 1
+            if self.index >= len(self.files):
+                return
+            path, size, _ = self.files[self.index]
+            self.left = size
+            if path in self.keep:
+                dest = recovery.STAGE_DIR + '/' + path
+                recovery._make_parent(dest)
+                self.f = open(dest, 'wb')
+                self.sink = _Sink(self.f, path, size)
+            if size:
+                return
+            self._done()
+
+    def _done(self):
+        """The current file is complete: check what was staged."""
+        path, size, sha = self.files[self.index]
+        if self.sink is not None:
+            self.f.close()
+            self.f = None
+            if self.sink.count != size or _hex(self.sink.hash) != sha:
+                self.sink = None
+                raise OtaError('bad hash ' + path)
+            self.sink = None
+
+    def _body(self, data):
+        pos = 0
+        while pos < len(data):
+            if self.index >= len(self.files):
+                raise OtaError('bundle too long')
+            take = min(self.left, len(data) - pos)
+            if self.sink is not None:
+                self.sink.write(data[pos:pos + take])
+            self.left -= take
+            pos += take
+            if self.left == 0:
+                self._done()
+                self._next()
+
+    def finish(self):
+        """The body ended: every file must have come."""
+        if self.head is not None or self.index < len(self.files):
+            raise OtaError('short bundle')
+
+    def close(self):
+        if self.f is not None:
+            self.f.close()
+            self.f = None
+
+
+def stage_bundle(fetch, plan_for, abort=None, free_bytes=None):
+    """Stream a bundle into recovery.STAGE_DIR, staging only what the plan
+    names, each file checked by size and git blob hash. Returns the plan.
+
+    fetch(sink) streams the bundle to sink.write. plan_for(header) returns
+    {'files': [(path, sha, size)], 'deletes', 'managed'} or raises
+    OtaError. Raises OtaError: 'bad bundle', 'mpy X, box Y', 'no space',
+    'aborted' (abort() true when a chunk arrives), 'bad hash <path>',
+    'short bundle', 'bundle too long'. A dropped download (_transient)
+    starts the bundle over once. On any error the stage folder is removed
+    and the error re-raised.
+    """
+    try:
+        for attempt in (1, 2):
+            recovery._rm_tree(recovery.STAGE_DIR)   # leftovers, or the dropped try
+            sink = _BundleSink(plan_for, abort, free_bytes)
+            try:
+                fetch(sink)
+                sink.finish()
+                return sink.plan
+            except Exception as e:
+                sink.close()
+                if attempt == 2 or not _transient(e):
+                    raise
+    except BaseException:
+        try:
+            recovery._rm_tree(recovery.STAGE_DIR)
+        except OSError:
+            pass   # keep the first error; the next run clears the stage first
+        raise

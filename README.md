@@ -71,6 +71,30 @@ A trainer's card followed by a card whose user is already authorized starts a
 second user is already authorized. Fixing this needs a server change: refuse
 training when the trainee is already authorized.
 
+## Load a box by cable
+
+The box runs precompiled modules (`.mpy`). Compiling `.py` files at boot takes
+memory that the first HTTPS connection then cannot get. `scripts/deploy.py`
+builds the modules and copies them over USB:
+
+```bash
+pip install mpremote pyserial
+export MPY_CROSS="wsl -e /home/<you>/micropython/mpy-cross/build/mpy-cross"
+py -3 scripts/deploy.py COM16            # --tests also copies tests/
+```
+
+- `MPY_CROSS` is the mpy-cross from BUILD_GUIDE.md Step 4, built from the same
+  MicroPython as the firmware (it must write `.mpy` v6.3). On Windows, run a
+  Linux build through WSL as shown.
+- It resets the box, stops it at the REPL before the app starts, compares every
+  file by its git hash, and copies only what differs.
+- It deletes each `X.py` that an `X.mpy` replaces (MicroPython loads the `.py`
+  first) and the old `manifest.json`.
+- It never overwrites the box's own `config/` files. `config/pins.py` and
+  `config/settings.py` are copied only to a box that has none. `boot.py`,
+  `main.py` and `recovery.py` stay `.py`.
+- Reset the box afterwards to boot it.
+
 ## Updates over WiFi (OTA)
 
 A box can update its own code from this GitHub repository.
@@ -80,11 +104,16 @@ A box can update its own code from this GitHub repository.
 - **When it checks:** at boot, and while the box is idle (no card session for 10
   minutes), every 60 seconds. After a successful check it waits a day; after a
   failed one, an hour. Putting a card in stops a download.
-- **What it downloads:** only the files in `src/` that differ from the box,
-  from GitHub's API (`api.github.com`) by each file's git hash, over one HTTPS
-  connection with the server certificate checked (`src/certs/github_roots.pem`).
-  Each file is checked against its git hash before anything is installed. A
-  download that drops (network error, server error) is tried once more.
+- **What it downloads:** the latest GitHub release (never a draft, a
+  prerelease, or a branch) and its `portalbox.bundle` file: the precompiled
+  modules plus a list of every file's size and git hash. The box reads the list
+  first and writes only the files that differ from its own to flash, each
+  checked against its hash before anything is installed. It deletes each old
+  `X.py` that an `X.mpy` replaces. The server certificate is checked
+  (`src/certs/github_roots.pem`), and the token goes only to `api.github.com`,
+  never to GitHub's download host. A download that drops (network error,
+  server error) starts over once. A bundle built for another MicroPython
+  (`.mpy` version) is refused.
 - **Trial:** the box restarts into the new version. After 60 seconds of the app
   running, the version is kept. If it fails to get there in 3 boots, the box
   goes back to the old version and never installs that one again (unless every
@@ -101,11 +130,10 @@ At the box's REPL:
 ```python
 from net import ota
 ota.create_config(user='ACherniske', repository='portalbox-firmware',
-                  token='<token>', enabled=True, mode='release')
+                  token='<token>', enabled=True)
 ```
 
-- `mode='release'` follows the latest GitHub release. `mode='branch'` with
-  `branch='<name>'` follows the newest commit on a branch (for testing).
+- The box follows the latest release of that repository.
 - `token` is needed while the repository is private: a fine-grained GitHub
   token with read-only access to this repository's contents. It is stored only
   on the box, in `/config/ota_config.json`. Never commit it.
@@ -114,11 +142,16 @@ ota.create_config(user='ACherniske', repository='portalbox-firmware',
 ### Release a new version
 
 ```bash
-gh release create vX.Y.Z --target main --generate-notes
+git switch main && git pull
+py -3 scripts/release.py vX.Y.Z            # --target <branch> for another branch
 ```
 
-Boxes in release mode install it within a day of their last check, at a boot or
-after 10 idle minutes.
+It refuses a working tree that is not clean or not the pushed tip of the
+target, builds the bundle (needs `MPY_CROSS`, see "Load a box by cable"), and
+creates the release with `gh`, the bundle attached. The new release is the
+latest one: boxes with OTA on install it within a day of their last check, at
+a boot or after 10 idle minutes. A release made by hand without the bundle is
+refused by the boxes (`no bundle`).
 
 ### Dev flag
 
@@ -152,7 +185,7 @@ mpremote connect COM16 exec "print(open('/log/events.log').read())"
 
 ### A box flashed by hand
 
-After copying `src/` to a box by cable, clear what it remembers about updates
+After loading a box by cable, clear what it remembers about updates
 (version, refused versions, trial, staged files). The live files stay as they are:
 
 ```python

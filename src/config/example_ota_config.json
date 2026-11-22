@@ -1,9 +1,7 @@
 {
   "user": "ACherniske",
   "repository": "portalbox-firmware",
-  "branch": "main",
   "token": "",
   "enabled": false,
-  "mode": "release",
   "ignore": []
 }

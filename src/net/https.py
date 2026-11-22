@@ -4,6 +4,7 @@ The fork's requests module turns certificate checks off, so OTA downloads
 and the Maker Portal API use this instead. The server must chain to a root in ROOTS_PATH and match
 the host name; anything else raises before a byte of the body is read.
 """
+import gc
 import io
 import json
 import socket
@@ -37,9 +38,28 @@ def _split(url):
     return host, '/' + path
 
 
+_roots_pem = None   # the roots file, read once and kept (2.9 KB)
+
+
 def _roots():
-    with open(ROOTS_PATH, 'rb') as f:
-        return f.read()
+    """The roots file's bytes, read on first use and kept.
+
+    Read per connection, the bytes need a block the fragmented heap may
+    not have. MicroPython then grows the heap into the largest free
+    block of system RAM, which the TLS handshake needs.
+    """
+    global _roots_pem
+    if _roots_pem is None:
+        with open(ROOTS_PATH, 'rb') as f:
+            _roots_pem = f.read()
+    return _roots_pem
+
+
+try:
+    # Boot imports this module (OTA check) while the heap still has room.
+    _roots()
+except OSError:
+    pass   # no roots file: the first connection raises
 
 
 _ctx = None   # one TLS context: the roots are parsed once, not per connection
@@ -66,12 +86,41 @@ def _connect(host, timeout_s=None):
     """Open a verified TLS connection to 'host[:port]'; returns the stream.
 
     timeout_s (default TIMEOUT_S) bounds each socket step on its own.
+    A failed handshake is tried once more, see _memory_error().
     """
     name, _, port = host.partition(':')
     port = int(port) if port else 443
-    ctx = _context()
     addr = socket.getaddrinfo(name, port)[0][-1]
     recovery.feed()   # DNS, then connect, each can be slow
+    try:
+        return _handshake(addr, name, timeout_s)
+    except (ValueError, OSError) as e:
+        if not _memory_error(e):
+            raise
+    # The garbage (and the old context) may fill a heap area grown from
+    # the RAM mbedTLS needs; a collect hands an empty area back.
+    forget_context()
+    gc.collect()
+    recovery.feed()
+    return _handshake(addr, name, timeout_s)
+
+
+def _memory_error(e):
+    """True if a handshake error may come from mbedTLS running out of RAM.
+
+    When MicroPython grows its heap during a handshake, it takes the
+    largest free block of system RAM. mbedTLS then fails to allocate and
+    reports it as a bad signature (ValueError) or a negative mbedTLS code
+    (OSError). Timeouts and other socket errors have a positive errno.
+    """
+    if isinstance(e, ValueError):
+        return True
+    return bool(e.args) and isinstance(e.args[0], int) and e.args[0] < 0
+
+
+def _handshake(addr, name, timeout_s):
+    """Connect to addr and run the TLS handshake for name; returns the stream."""
+    ctx = _context()
     sock = socket.socket()
     try:
         sock.settimeout(TIMEOUT_S if timeout_s is None else timeout_s)
@@ -247,12 +296,23 @@ def request(method, url, headers=None, body=None, max_bytes=4096, timeout_s=None
         stream.close()
 
 
+def _for_host(sent, host, first):
+    """The headers for a hop to `host`: once a redirect leaves the first
+    host, Authorization is dropped for good. The token belongs to the API
+    host; GitHub's download host also refuses a second credential."""
+    if host == first:
+        return sent
+    return {k: v for k, v in sent.items() if k.lower() != 'authorization'}
+
+
 def _get(url, headers, read):
     sent = {'User-Agent': USER_AGENT}
     sent.update(headers or {})
+    first = _split(url)[0]
     for hop in range(MAX_REDIRECTS + 1):
         recovery.feed()
         host, path = _split(url)
+        sent = _for_host(sent, host, first)
         status, reply, stream = _request(host, path, sent)
         try:
             if status in _REDIRECTS and hop < MAX_REDIRECTS:
@@ -350,9 +410,11 @@ class Session:
     def _get(self, url, headers, read):
         sent = {'User-Agent': USER_AGENT}
         sent.update(headers or {})
+        first = _split(url)[0]
         for hop in range(MAX_REDIRECTS + 1):
             recovery.feed()
             host, path = _split(url)
+            sent = _for_host(sent, host, first)
             try:
                 status, reply = self._send(host, path, sent)
                 if status in _REDIRECTS and hop < MAX_REDIRECTS:

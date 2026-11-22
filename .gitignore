@@ -34,3 +34,5 @@ Thumbs.db
 # Testing
 # test_*.py
 # mock_*.py
+# Host build output (scripts/build.py)
+build/

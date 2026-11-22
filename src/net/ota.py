@@ -1,7 +1,8 @@
 """PortalBox OTA: update the box from GitHub, plus config and backup helpers.
 
-run_update() picks the target version (net.ota_target), downloads and
-checks it (net.ota_stage), and installs it on trial (recovery.install).
+run_update() finds the latest release (net.ota_target), streams its bundle
+into the stage folder (net.ota_stage), and installs it on trial
+(recovery.install).
 The caller connects WiFi first.
 
 backup()/restore() are based on `ugit` by turfptax for the OpenMuscle
@@ -22,10 +23,9 @@ from net.https import HttpError
 from net.ota_target import OtaError
 
 _API = 'https://api.github.com'
-# Files come from the API by blob sha, as raw bytes: api.github.com's ECC
-# certificate chain needs far less RAM to check than raw.githubusercontent.com's
-# RSA-4096 one, which failed on boxes without PSRAM.
-_RAW_MEDIA = 'application/vnd.github.raw'
+# The release asset's bytes, not its JSON description. GitHub answers with a
+# redirect to its asset host; https drops the token on that hop.
+_ASSET_MEDIA = 'application/octet-stream'
 _CONFIG_PATH = '/config/ota_config.json'
 _OTA_STATE_PATH = '/config/ota_state.json'
 _OTA_INTERVAL_SECONDS = 24 * 60 * 60   # wait after a good check
@@ -189,11 +189,9 @@ def load_config(path=_CONFIG_PATH):
     return {
         'user': stored.get('user', ''),
         'repository': stored.get('repository', ''),
-        'branch': stored.get('branch', 'main'),
         'token': stored.get('token', ''),
         'ignore': stored.get('ignore', []),
         'enabled': stored.get('enabled') is True,
-        'mode': stored.get('mode', 'release'),
     }
 
 
@@ -276,15 +274,15 @@ def _reason(e):
     return ('%s %s' % (type(e).__name__, e)).rstrip()
 
 
-def _local_hashes(tree):
-    """Git blob sha of each box file the target tree also has."""
+def _local_hashes(files):
+    """Git blob sha of each box file the bundle names, and of each X.py
+    an X.mpy in it would replace."""
     local = {}
-    for e in tree:
-        if e['type'] == 'blob':
-            sha = ota_stage.file_sha(recovery.LIVE_ROOT + '/' + e['path'])
-            if sha:
-                local[e['path']] = sha
-            recovery.feed()
+    for path in [p for p, _, _ in files] + ota_target.shadowed_py(files):
+        sha = ota_stage.file_sha(recovery.LIVE_ROOT + '/' + path)
+        if sha:
+            local[path] = sha
+        recovery.feed()
     return local
 
 
@@ -295,63 +293,70 @@ def _update(cfg, abort, get_json, fetch):
     if state['trial']:
         return 'failed: trial active'   # install() would refuse after the download
     auth = {'Authorization': 'Bearer ' + cfg['token']} if cfg.get('token') else {}
-    session = https.Session()   # one kept connection: one TLS handshake, not one per file
+    session = https.Session()   # one kept connection for the API calls
 
     def api_get(path):
         return session.get_json(_API + path, auth)   # parsed as it arrives
 
-    blobs = _API + '/repos/%s/%s/git/blobs/' % (cfg['user'], cfg['repository'])
-    blob_headers = dict(auth)
-    blob_headers['Accept'] = _RAW_MEDIA
+    assets = _API + '/repos/%s/%s/releases/assets/' % (cfg['user'], cfg['repository'])
+    asset_headers = dict(auth)
+    asset_headers['Accept'] = _ASSET_MEDIA
 
-    def blob_get(path, sha, sink):
-        return session.get(blobs + sha, blob_headers, sink=sink)
+    def asset_get(asset, sink):
+        return session.get(assets + str(asset), asset_headers, sink=sink)
 
     try:
-        return _apply(cfg, abort, state, get_json or api_get, fetch or blob_get)
+        return _apply(cfg, abort, state, get_json or api_get, fetch or asset_get)
     finally:
         session.close()
 
 
 def _apply(cfg, abort, state, get_json, fetch):
     target = ota_target.resolve_target(cfg, get_json)
-    commit = target['commit']
-    if commit in state['bad']:
+    version = target['version']
+    if version in state['bad']:
         return 'bad version'
-    if commit == state['version']:
+    if version == state['version']:
         return 'up to date'
-    tree = target['tree']
-    plan = ota_target.build_plan(tree, _local_hashes(tree), state['managed'],
-                                 cfg.get('ignore', []))
+
+    def plan_for(header):
+        # The header names every file and its hash: plan from it before
+        # the bodies arrive, so only changed files reach the stage folder.
+        if header['version'] != version:
+            raise OtaError('bundle %s, release %s' % (header['version'], version))
+        files = header['files']
+        return ota_target.build_plan(files, _local_hashes(files), state['managed'],
+                                     cfg.get('ignore', []))
+
+    plan = ota_stage.stage_bundle(lambda sink: fetch(target['asset'], sink), plan_for, abort)
+    # stage_bundle checks abort only as chunks arrive: a card tapped as the
+    # last one came must stop the install and its reset too.
+    if abort and abort():
+        raise OtaError('aborted')
     if not plan['files'] and not plan['deletes']:
-        # Same files (a docs-only commit, or a box set up by cable):
-        # adopt the version without a trial or a reset.
-        state['version'] = commit
+        # Same files (a release with no code change, or a box set up by
+        # cable): adopt the version without a trial or a reset.
+        recovery._rm_tree(recovery.STAGE_DIR)
+        state['version'] = version
         state['managed'] = plan['managed']
         recovery.save_state(state)
         return 'up to date'
-    # Blob shas from the tree pin every file to the same version.
-    ota_stage.stage(plan, tree, fetch, abort)
-    # stage() checks only before each file: a card tapped during the
-    # last download must stop the install and its reset too.
-    if abort and abort():
-        raise OtaError('aborted')
-    recovery.install(commit, [p for p, _, _ in plan['files']], plan['deletes'],
+    recovery.install(version, [p for p, _, _ in plan['files']], plan['deletes'],
                      plan['managed'])
-    return 'installed ' + commit
+    return 'installed ' + version
 
 
 def run_update(cfg, at_boot, abort=None, get_json=None, fetch=None, reset=machine.reset):
-    """Update the box to the version `cfg` asks for. Never raises.
+    """Update the box to the latest release. Never raises.
 
-    Returns 'off', 'up to date', 'bad version', 'installed <commit>' or
-    'failed: <why>', and logs it with 'boot' or 'idle'. abort() true
-    between files, or after the last one, stops it before the install. After an install it calls reset(),
-    so the box boots the new version on trial. It also resets when a
-    failed install left its journal (its rollback failed too), so on_boot
-    finishes the rollback. get_json and fetch default to one
-    https.Session (JSON with get_json, each file's blob with get), with
-    the token from cfg; tests pass fakes.
+    Returns 'off', 'up to date', 'bad version', 'installed <tag>' or
+    'failed: <why>', and logs it with 'boot' or 'idle'. abort() true as a
+    chunk of the bundle arrives, or after the last one, stops it before
+    the install. After an install it calls reset(), so the box boots the
+    new version on trial. It also resets when a failed install left its
+    journal (its rollback failed too), so on_boot finishes the rollback.
+    get_json(path) and fetch(asset_id, sink) default to one https.Session
+    with the token from cfg; tests pass fakes.
     """
     journal_before = recovery._exists(recovery.JOURNAL_PATH)
     try:
@@ -369,12 +374,11 @@ def run_update(cfg, at_boot, abort=None, get_json=None, fetch=None, reset=machin
     return result
 
 
-def create_config(user='', repository='', branch='main', token='', ignore=None,
-                  enabled=False, mode='release'):
+def create_config(user='', repository='', token='', ignore=None, enabled=False):
     """Write the OTA config file to `/config/ota_config.json`.
 
-    mode 'release' follows the latest GitHub release; 'branch' follows
-    the tip of `branch`. OTA stays off until `enabled` is True.
+    The box follows the latest GitHub release of user/repository.
+    OTA stays off until `enabled` is True.
     """
     if ignore is None:
         ignore = []
@@ -383,11 +387,9 @@ def create_config(user='', repository='', branch='main', token='', ignore=None,
     config = {
         'user': user,
         'repository': repository,
-        'branch': branch,
         'token': token,
         'ignore': ignore,
         'enabled': enabled,
-        'mode': mode,
     }
 
     with open(_CONFIG_PATH, 'w') as file_handle:

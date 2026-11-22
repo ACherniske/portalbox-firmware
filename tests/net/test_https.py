@@ -242,12 +242,11 @@ def test_raw_file_matches_blob_hash():
 
 
 def test_blob_api_gives_raw_bytes():
-    """GitHub's side of the OTA download: the blob API, asked with the media
-    type ota uses, streams the file's bytes (not base64 JSON)."""
-    from net import ota
+    """A 20 KB file streamed from api.github.com to a sink: the blob API,
+    asked for the raw media type, sends the bytes (not base64 JSON)."""
     _online()
     headers = _auth()
-    headers['Accept'] = ota._RAW_MEDIA
+    headers['Accept'] = 'application/vnd.github.raw'
     sink = CountingSink(WIFI_SIZE)
     url = 'https://api.github.com/repos/ACherniske/portalbox-firmware/git/blobs/' + WIFI_HASH
     got = https.get(url, headers=headers, sink=sink)
@@ -339,16 +338,67 @@ def test_http_url_refused():
 
 def test_follows_redirect_with_headers():
     def run(fake):
-        body = https.get('https://a.example/one', headers={'Authorization': 'Bearer t'})
+        body = https.get('https://a.example/one', headers={'Accept': 'x/y'})
         assert body == b'done', repr(body)
         assert len(fake.calls) == 2, fake.calls
         host, path, hdrs = fake.calls[1]
         assert (host, path) == ('b.example', '/two?x=1'), (host, path)
-        assert hdrs.get('Authorization') == 'Bearer t', hdrs
+        assert hdrs.get('Accept') == 'x/y', hdrs
         assert hdrs.get('User-Agent'), hdrs
         assert fake.all_closed(), 'stream left open'
     _with_fake([(301, {'location': 'https://b.example/two?x=1'}, b''),
                 (200, {'content-length': '4'}, b'done')], run)
+
+
+_AUTH = {'Authorization': 'Bearer t', 'Accept': 'x/y'}
+
+
+def test_redirect_other_host_drops_token():
+    """GitHub sends release downloads to another host: the token must
+    stay with api.github.com (and the signed URL refuses a second auth)."""
+    sent = dict(_AUTH)
+
+    def run(fake):
+        assert https.get('https://a.example/one', headers=sent) == b'done'
+        hdrs = fake.calls[1][2]
+        assert 'Authorization' not in hdrs, hdrs
+        assert hdrs.get('Accept') == 'x/y', hdrs
+        assert fake.calls[0][2].get('Authorization') == 'Bearer t', fake.calls[0]
+    _with_fake([(302, {'location': 'https://other.example/x'}, b''),
+                (200, {'content-length': '4'}, b'done')], run)
+    assert sent == _AUTH, "caller's headers changed: %r" % sent
+
+
+def test_redirect_same_host_keeps_token():
+    def run(fake):
+        assert https.get('https://a.example/one', headers=dict(_AUTH)) == b'done'
+        assert fake.calls[1][2].get('Authorization') == 'Bearer t', fake.calls[1]
+    _with_fake([(302, {'location': '/y'}, b''),
+                (200, {'content-length': '4'}, b'done')], run)
+
+
+def test_token_stays_dropped_after_return():
+    """Once off the first host, the token never comes back, even when a
+    later redirect points at the first host again."""
+    def run(fake):
+        assert https.get('https://a.example/one', headers=dict(_AUTH)) == b'done'
+        assert 'Authorization' not in fake.calls[2][2], fake.calls[2]
+    _with_fake([(302, {'location': 'https://b.example/x'}, b''),
+                (302, {'location': 'https://a.example/z'}, b''),
+                (200, {'content-length': '4'}, b'done')], run)
+
+
+def test_session_redirect_other_host_drops_token():
+    def run(s, fake):
+        sink = CountingSink(4)
+        s.get('https://a.example/one', dict(_AUTH), sink=sink)
+        assert sink.count == 4, sink.count
+        hdrs = fake.made[1].requests[0][1]
+        assert fake.made[1].host == 'other.example', fake.made[1].host
+        assert 'Authorization' not in hdrs, hdrs
+        assert hdrs.get('Accept') == 'x/y', hdrs
+    _with_session([[_reply(302, headers={'location': 'https://other.example/x'})],
+                   [_reply(200, b'done')]], run)
 
 
 def test_relative_redirect_stays_on_host():
@@ -677,11 +727,144 @@ def test_one_tls_context_for_all_connections():
     assert made[0] == 1 and loaded[0] == 1, 'contexts %d, root loads %d' % (made[0], loaded[0])
 
 
+def test_roots_read_once():
+    """The roots are read once and kept: read per connection, their 2.9 KB
+    needs a block a fragmented heap may not have, and the heap then grows
+    into the system RAM the handshake needs."""
+    saved = (https.ROOTS_PATH, https._roots_pem)
+    https.ROOTS_PATH = '/t_roots.pem'
+    https._roots_pem = None
+    try:
+        with open('/t_roots.pem', 'wb') as f:
+            f.write(b'first')
+        assert https._roots() == b'first'
+        with open('/t_roots.pem', 'wb') as f:
+            f.write(b'second')
+        got = https._roots()
+    finally:
+        https.ROOTS_PATH, https._roots_pem = saved
+        import os
+        os.remove('/t_roots.pem')
+    assert got == b'first', 'roots read again: %r' % got
+
+
+def test_roots_loaded_at_import():
+    """Boot imports net.https (OTA) long before the first call, while the
+    heap still has room: the roots must be read then."""
+    import sys
+    import net
+    old = sys.modules.pop('net.https')
+    try:
+        fresh = __import__('net.https', None, None, ['ROOTS_PATH'])
+        loaded = fresh._roots_pem
+    finally:
+        sys.modules['net.https'] = old
+        net.https = old
+    assert loaded is not None and loaded.startswith(b'-----BEGIN'), \
+        'roots not loaded at import: %r' % (loaded,)
+
+
+class _FlakyTls(_FakeSocketModule):
+    """socket + tls whose handshakes fail with the given errors in turn,
+    then succeed; also stands in for gc to record collect()."""
+
+    def __init__(self, fails, connect_error=None):
+        super().__init__([])
+        self.fails = list(fails)
+        self.connect_error = connect_error
+        self.contexts = 0
+
+    def SSLContext(self, protocol):
+        self.contexts += 1
+        self.events.append('context')
+        return self
+
+    def connect(self, addr):
+        self.events.append('connect')
+        if self.connect_error is not None:
+            raise self.connect_error
+
+    def wrap_socket(self, sock, server_hostname=None):
+        self.events.append('handshake')
+        if self.fails:
+            raise self.fails.pop(0)
+        return self
+
+    def collect(self):
+        self.events.append('collect')
+
+
+def _connect_flaky(fake):
+    """https._connect('example.com') on fake; returns the error or None."""
+    import gc
+    saved = (https.socket, https.tls, https._roots, https._ctx, recovery.feed)
+    https.socket = https.tls = https.gc = fake
+    https._roots = lambda: b''
+    https._ctx = None
+    recovery.feed = lambda: fake.events.append('feed')
+    try:
+        https._connect('example.com')
+        return None
+    except Exception as e:
+        return e
+    finally:
+        https.socket, https.tls, https._roots, https._ctx, recovery.feed = saved
+        https.gc = gc
+
+
+def test_tls_failure_retried_on_fresh_memory():
+    """At boot the heap can grow into the RAM a handshake needs; mbedTLS
+    then reports a bad signature. Retry once: close the socket, drop the
+    context, collect (which hands the grown heap back), feed, try again."""
+    fake = _FlakyTls([ValueError('not correctly signed')])
+    err = _connect_flaky(fake)
+    ev = fake.events
+    assert err is None, 'retry not made: %r (%r)' % (err, ev)
+    assert ev.count('handshake') == 2 and fake.contexts == 2, ev
+    first = ev.index('handshake')
+    between = ev[first + 1:ev.index('connect', first)]
+    for step in ('close', 'collect', 'feed'):
+        assert step in between, 'no %s before the retry: %r' % (step, ev)
+
+
+def test_mbedtls_error_retried():
+    """An alloc failure can also surface as a negative mbedTLS code."""
+    fake = _FlakyTls([OSError(-17040, 'MBEDTLS_ERR_MPI_ALLOC_FAILED')])
+    err = _connect_flaky(fake)
+    assert err is None and fake.events.count('handshake') == 2, (err, fake.events)
+
+
+def test_second_tls_failure_raises():
+    """One retry only: a real bad certificate still fails, one handshake later."""
+    fake = _FlakyTls([ValueError('bad 1'), ValueError('bad 2')])
+    err = _connect_flaky(fake)
+    assert isinstance(err, ValueError) and str(err) == 'bad 2', repr(err)
+    assert fake.events.count('handshake') == 2, fake.events
+
+
+def test_handshake_timeout_not_retried():
+    """A timeout (positive errno) is the network, not memory: a retry
+    would only double the wait."""
+    fake = _FlakyTls([OSError(110)])
+    err = _connect_flaky(fake)
+    assert isinstance(err, OSError) and fake.events.count('handshake') == 1, (err, fake.events)
+
+
+def test_connect_error_not_retried():
+    fake = _FlakyTls([], connect_error=OSError(113))
+    err = _connect_flaky(fake)
+    assert isinstance(err, OSError) and fake.events.count('connect') == 1, (err, fake.events)
+
+
 def run():
     join_first()
     runner = TestRunner()
     runner.run_test("http URL refused", test_http_url_refused)
     runner.run_test("Follows redirect with headers", test_follows_redirect_with_headers)
+    runner.run_test("Redirect to another host drops the token", test_redirect_other_host_drops_token)
+    runner.run_test("Redirect on the same host keeps the token", test_redirect_same_host_keeps_token)
+    runner.run_test("Token stays dropped after returning", test_token_stays_dropped_after_return)
+    runner.run_test("Session redirect to another host drops the token", test_session_redirect_other_host_drops_token)
     runner.run_test("Three redirects allowed", test_three_redirects_allowed)
     runner.run_test("More than three redirects is an error", test_redirect_limit)
     runner.run_test("Redirect to http refused", test_redirect_to_http_refused)
@@ -709,6 +892,13 @@ def run():
     runner.run_test("Session close() closes the connection", test_session_close_closes_connection)
     runner.run_test("One TLS context for all connections", test_one_tls_context_for_all_connections)
     runner.run_test("Feeds after DNS and after the reply head", test_feeds_after_dns_and_head)
+    runner.run_test("Roots read once", test_roots_read_once)
+    runner.run_test("Roots loaded at import", test_roots_loaded_at_import)
+    runner.run_test("TLS failure retried on fresh memory", test_tls_failure_retried_on_fresh_memory)
+    runner.run_test("mbedTLS error retried", test_mbedtls_error_retried)
+    runner.run_test("Second TLS failure raises", test_second_tls_failure_raises)
+    runner.run_test("Handshake timeout not retried", test_handshake_timeout_not_retried)
+    runner.run_test("Connect error not retried", test_connect_error_not_retried)
     runner.run_test("GitHub API over verified TLS", test_api_over_verified_tls)
     runner.run_test("Raw file matches its blob hash", test_raw_file_matches_blob_hash)
     runner.run_test("Blob API gives raw bytes", test_blob_api_gives_raw_bytes)
