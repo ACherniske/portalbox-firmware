@@ -24,6 +24,11 @@ The address lives only on the box, never in this repository. Without the file,
 the box refuses every card. `"url": ""` uses built-in test cards instead of a
 server; use it only on a bench.
 
+The box checks the server's certificate against the roots in
+`/certs/github_roots.pem`: ISRG Root X1 (Let's Encrypt) and USERTrust ECC. A
+server whose certificate chains to any other root fails every TLS handshake,
+and the box refuses every card. Check the server's chain before you deploy.
+
 ### Set up the box on the portal
 
 1. **Find the box's MAC address.** It's 12 lowercase hex digits, no colons
