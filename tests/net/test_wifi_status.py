@@ -28,7 +28,7 @@ class FakeNIC:
     def active(self, *args):
         return True
 
-    def connect(self, ssid, **kw):
+    def connect(self, ssid, key=None, **kw):
         pass
 
     def disconnect(self):
@@ -150,7 +150,7 @@ def run():
         wifi.gc = _GC()
         try:
             mgr = _manager([1001, 1010, 1001, 1010], pre=None)
-            mgr.nic.connect = lambda ssid, **kw: events.append('connect')
+            mgr.nic.connect = lambda ssid, key=None, **kw: events.append('connect')
             mgr.connect('password123', skip_init=True)
             mgr.connect('password123', skip_init=True)
         finally:

@@ -342,16 +342,15 @@ class WifiManager:
         self._log(f"[WiFi] Connecting to {self.config.ssid} ({net_type})...")
 
         try:
-            connect_params = {'key': password}
+            # The firmware's connect() takes ssid and key positionally only,
+            # and has no WPA3 switch: the driver picks WPA2 or WPA3 from
+            # what the access point offers.
+            connect_params = {}
 
             if self._bssid:
                 connect_params['bssid'] = self._bssid
 
-            if self.config.wpa3:
-                connect_params['wpa3'] = True
-                self._log("[WiFi] Enforcing WPA3 authentication")
-
-            self.nic.connect(self.config.ssid, **connect_params)
+            self.nic.connect(self.config.ssid, password, **connect_params)
             self._log("[WiFi] Connection initiated")
             self.status = NetworkStatus.CONNECTING
             return True

@@ -120,7 +120,7 @@ class _FakeNIC:
     def active(self, *args):
         return True
 
-    def connect(self, ssid, **kw):
+    def connect(self, ssid, key=None, **kw):
         pass
 
     def disconnect(self):

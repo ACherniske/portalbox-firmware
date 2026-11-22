@@ -10,6 +10,12 @@ STRONG = b'\x44\x12\x44\x6b\xae\x60'
 WEAK = b'\x48\xb4\xc3\xd8\x65\x60'
 OTHER = b'\x00\x11\x22\x33\x44\x55'
 
+# Keyword arguments the firmware's WLAN.connect() accepts
+# (h-milz fork e244d80, ports/esp32/network_wlan.c network_wlan_connect).
+CONNECT_KEYWORDS = ('bssid', 'eap_method', 'username', 'password', 'identity',
+                    'ca_cert', 'ttls_phase2_method', 'client_cert', 'private_key',
+                    'private_key_password', 'disable_time_check')
+
 
 def _ap(ssid, bssid, rssi):
     # Same shape as WLAN.scan(): (ssid, bssid, channel, rssi, security, hidden)
@@ -23,6 +29,7 @@ class FakeNIC:
     def __init__(self, scans):
         self.scans = list(scans)
         self.scan_calls = 0
+        self.connect_args = []
         self.connect_kw = []
         self.current = 1000
 
@@ -33,7 +40,13 @@ class FakeNIC:
             raise result
         return result
 
-    def connect(self, ssid, **kw):
+    def connect(self, *args, **kw):
+        # The firmware's connect(): ssid and key are positional only; the
+        # rest are these keywords. Anything else raises, as on the box.
+        extra = [k for k in kw if k not in CONNECT_KEYWORDS]
+        if extra or len(args) > 2:
+            raise TypeError('extra keyword arguments given')
+        self.connect_args.append(args)
         self.connect_kw.append(kw)
         self.current = 1010
 
@@ -133,6 +146,23 @@ def run():
             os.remove(CA_FILE)
         assert kw.get('bssid') == STRONG, "bssid %r" % (kw.get('bssid'),)
 
+    def test_psk_key_positional():
+        mgr = _manager([[_ap(b'net', STRONG, -63)]])
+        _connect(mgr)
+        args = mgr.nic.connect_args[-1]
+        assert args == ('net', 'password123'), "connect args %r" % (args,)
+
+    def test_wpa3_psk_connects():
+        config = WiFiConfig()
+        config.set_wpa3_psk('net', 'password123')
+        mgr = _manager([[_ap(b'net', STRONG, -63)]], config)
+        kw = _connect(mgr)
+        args = mgr.nic.connect_args[-1]
+        assert args == ('net', 'password123'), "connect args %r" % (args,)
+        assert kw.get('bssid') == STRONG, "bssid %r" % (kw.get('bssid'),)
+
+    runner.run_test("WPA2-PSK passes the key positionally", test_psk_key_positional)
+    runner.run_test("WPA3-PSK connects with the firmware's arguments", test_wpa3_psk_connects)
     runner.run_test("Joins the strongest AP of the network", test_joins_strongest)
     runner.run_test("No matching AP connects without bssid", test_no_match_no_bssid)
     runner.run_test("Scan error connects without bssid", test_scan_error_no_bssid)
