@@ -39,6 +39,20 @@ class TestBuild(unittest.TestCase):
         self.assertNotIn('manifest.json', devices)
         self.assertEqual(devices, sorted(devices))
 
+    def test_required_in_ship_list(self):
+        """The box refuses a bundle without its REQUIRED files: the build
+        must always ship them (read from src/net/ota_target.py)."""
+        import ast
+        with open(os.path.join(SRC, 'net', 'ota_target.py'), encoding='utf-8') as f:
+            tree = ast.parse(f.read())
+        required = None
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and getattr(node.targets[0], 'id', '') == 'REQUIRED':
+                required = ast.literal_eval(node.value)
+        self.assertTrue(required, 'REQUIRED not found')
+        devices = [d for _, d in build.ship_list(SRC)]
+        self.assertEqual([p for p in required if p not in devices], [])
+
     def test_ship_list_refuses_unlisted_module(self):
         src = os.path.join(self.tmp, 'src')
         shutil.copytree(SRC, src, ignore=shutil.ignore_patterns('__pycache__'))

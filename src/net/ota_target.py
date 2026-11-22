@@ -1,8 +1,8 @@
-"""Pick the version to update to, and refuse trees that are unsafe to install.
+"""Pick the version to update to, and refuse updates that are unsafe to install.
 
-resolve_target() asks GitHub which commit to run and lists its src/ folder.
-build_plan() compares that list with the box and says what to change.
-Nothing is downloaded or installed here.
+resolve_target() asks GitHub for the latest release and its bundle asset.
+build_plan() compares the bundle's header with the box and says what to
+change. Nothing is downloaded or installed here.
 """
 import recovery
 from net.https import HttpError
@@ -13,66 +13,37 @@ class OtaError(Exception):
 
 
 # The box must be able to boot and reach GitHub again after any update.
-# The old code on the box checks the new tree, so renaming one of these
+# The old code on the box checks the new bundle, so renaming one of these
 # later means boxes on the old list need a cable.
 REQUIRED = (
     'boot.py', 'main.py', 'recovery.py',
-    'core/system.py', 'core/main.py',
-    'net/ota.py', 'net/ota_target.py', 'net/ota_stage.py', 'net/https.py', 'net/wifi.py',
-    'certs/github_roots.pem', 'manifest.json',
+    'core/system.mpy', 'core/main.mpy',
+    'net/__init__.mpy', 'net/ota.mpy', 'net/ota_target.mpy', 'net/ota_stage.mpy',
+    'net/https.mpy', 'net/wifi.mpy',
+    'certs/github_roots.pem',
 )
 
-_MAX_TAG_DEPTH = 3
-
-
-def _commit_of(obj, get_json, repo):
-    """Follow annotated tag objects down to the commit sha."""
-    for _ in range(_MAX_TAG_DEPTH):
-        if obj['type'] == 'commit':
-            return obj['sha']
-        if obj['type'] != 'tag':
-            raise OtaError('ref is a %s' % obj['type'])
-        obj = get_json(repo + '/git/tags/' + obj['sha'])['object']
-    raise OtaError('tag chain too long')
+BUNDLE_NAME = 'portalbox.bundle'
 
 
 def resolve_target(cfg, get_json):
-    """Return {'commit', 'label', 'tree'} for the version `cfg` asks for.
+    """Return {'version': tag, 'asset': id} of the latest release's bundle.
 
     get_json(path) returns the parsed reply for an API path such as
     '/repos/u/r/releases/latest' and raises HttpError on a bad status.
-    tree holds the blobs and folders of src/, as device paths.
+    Only releases are followed: a branch in cfg is ignored.
     """
     repo = '/repos/%s/%s' % (cfg['user'], cfg['repository'])
-    mode = cfg.get('mode', 'release')
-    if mode == 'release':
-        try:
-            label = get_json(repo + '/releases/latest')['tag_name']
-        except HttpError as e:
-            if e.status == 404:
-                raise OtaError('no release')
-            raise
-        obj = get_json(repo + '/git/ref/tags/' + label)['object']
-    elif mode == 'branch':
-        label = cfg['branch']
-        obj = get_json(repo + '/git/ref/heads/' + label)['object']
-    else:
-        raise OtaError('bad mode %s' % mode)
-    commit = _commit_of(obj, get_json, repo)
-
-    # Only src/ is fetched: the whole repo's list is too big for the heap.
-    src = None
-    for e in get_json(repo + '/git/trees/' + commit)['tree']:
-        if e['path'] == 'src' and e['type'] == 'tree':
-            src = e['sha']
-    if src is None:
-        raise OtaError('no src')
-    reply = get_json(repo + '/git/trees/' + src + '?recursive=1')
-    if reply.get('truncated'):
-        raise OtaError('tree truncated')
-    tree = [{'path': e['path'], 'sha': e['sha'], 'size': e.get('size', 0),
-             'type': e['type']} for e in reply['tree']]
-    return {'commit': commit, 'label': label, 'tree': tree}
+    try:
+        release = get_json(repo + '/releases/latest')
+    except HttpError as e:
+        if e.status == 404:
+            raise OtaError('no release')
+        raise
+    for asset in release.get('assets', []):
+        if asset.get('name') == BUNDLE_NAME:
+            return {'version': release['tag_name'], 'asset': asset['id']}
+    raise OtaError('no bundle')
 
 
 def _norm(entry):
@@ -96,25 +67,34 @@ def _local_only(path):
             or path.split('/')[0] in recovery.LOCAL_DIRS)
 
 
-def build_plan(tree, local_hashes, managed, ignore):
-    """Say what an update to `tree` changes on this box.
+def shadowed_py(files):
+    """The X.py for each X.mpy in the bundle header: MicroPython imports a
+    .py ahead of its .mpy, so a stale one must go."""
+    return sorted(p[:-4] + '.py' for p, _, _ in files if p.endswith('.mpy'))
 
-    tree: entries from resolve_target. local_hashes: device path -> git blob
-    sha of files on the box. managed: files the last update installed.
-    ignore: paths OTA leaves alone. Returns {'files': [(path, sha, size)]
-    changed or new, 'deletes': [managed paths gone from the target],
-    'managed': [every path this update owns]}. Raises OtaError for a tree
-    that is unsafe to install.
+
+def build_plan(files, local_hashes, managed, ignore):
+    """Say what an update to the bundle's `files` changes on this box.
+
+    files: header entries (path, size, sha). local_hashes: device path ->
+    git blob sha of box files (header paths and shadowed_py paths).
+    managed: files the last update installed. ignore: paths OTA leaves
+    alone. Returns {'files': [(path, sha, size)] changed or new,
+    'deletes': [managed paths gone from the bundle, and each X.py an X.mpy
+    replaces], 'managed': [every path this update owns]}. Raises OtaError
+    for a bundle that is unsafe to install.
     """
     blobs = {}
-    for e in tree:
-        if e['type'] == 'blob':
-            blobs[e['path']] = e
+    for path, size, sha in files:
+        parts = path.split('/')
+        if not path or '' in parts or '..' in parts:
+            raise OtaError('bad path %r' % path)
+        blobs[path] = (sha, size)
     for path in REQUIRED:
         if path not in blobs:
             raise OtaError('missing ' + path)
     for path in recovery.ANCHOR_FILES:
-        if blobs[path]['sha'] != local_hashes.get(path):
+        if blobs[path][0] != local_hashes.get(path):
             raise OtaError('anchor changed, needs cable')
 
     ignore = [_norm(i) for i in ignore]
@@ -123,13 +103,16 @@ def build_plan(tree, local_hashes, managed, ignore):
         return not (path in recovery.ANCHOR_FILES or _local_only(path)
                     or _ignored(path, ignore))
 
-    files = []
+    planned = []
     new_managed = []
-    for path, e in blobs.items():
+    for path, (sha, size) in blobs.items():
         if not owned(path):
             continue
         new_managed.append(path)
-        if e['sha'] != local_hashes.get(path):
-            files.append((path, e['sha'], e['size']))
+        if sha != local_hashes.get(path):
+            planned.append((path, sha, size))
     deletes = [p for p in managed if p not in blobs and owned(p)]
-    return {'files': files, 'deletes': deletes, 'managed': new_managed}
+    for py in shadowed_py(files):
+        if py in local_hashes and owned(py) and owned(py[:-3] + '.mpy') and py not in deletes:
+            deletes.append(py)
+    return {'files': planned, 'deletes': deletes, 'managed': new_managed}
