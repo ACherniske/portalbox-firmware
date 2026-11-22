@@ -387,6 +387,55 @@ def run():
             assert _FakeSession.made[0].closed == 1, "not closed after an error"
         _with_sessions(check)
 
+    # --- the TLS context is freed between taps -------------------------------
+
+    def _with_forget(check):
+        """check(server, logs, forgot): forgot gets len(server.calls) each
+        time api frees the TLS context."""
+        def fn(server, logs, *rest):
+            had = hasattr(https, 'forget_context')
+            saved = getattr(https, 'forget_context', None)
+            forgot = []
+            https.forget_context = lambda: forgot.append(len(server.calls))
+            try:
+                check(server, logs, forgot)
+            finally:
+                if had:
+                    https.forget_context = saved
+                else:
+                    del https.forget_context
+        return fn
+
+    def test_one_shot_frees_tls():
+        def check(server, logs, forgot):
+            api.activate(USER)
+            assert forgot == [1], "freed %r, want once after the call" % (forgot,)
+        _with(_with_forget(check), body=_equipment(30))
+
+    def test_one_shot_error_frees_tls():
+        def check(server, logs, forgot):
+            assert api.activate(USER) == (False, None)
+            assert forgot == [1], "freed %r after an error" % (forgot,)
+        _with(_with_forget(check), raises=OSError(113))
+
+    def test_held_frees_tls_on_release():
+        def check(server, logs, forgot):
+            api.hold()
+            api.activate(USER)
+            api.change_card(USER, PROXY)
+            assert forgot == [], "freed while held: %r" % (forgot,)
+            api.release()
+            assert forgot == [0], "freed %r on release, want once" % (forgot,)
+        _with_sessions(lambda server, logs, raises: _with_forget(check)(server, logs))
+
+    def test_no_server_call_frees_nothing():
+        def check(server, logs, forgot):
+            api.hold()
+            api.release()
+            api.activate(USER)   # WiFi down: no request
+            assert forgot == [], "freed %r with no call" % (forgot,)
+        _with(_with_forget(check), up=False)
+
     runner.run_test("card_id: hex uid -> decimal", test_card_id_decimal)
     runner.run_test("card_id: bad uid -> None", test_card_id_bad)
     runner.run_test("mac: 12 lowercase hex", test_mac)
@@ -413,6 +462,10 @@ def run():
     runner.run_test("release() ends sharing", test_release_ends_sharing)
     runner.run_test("hold() with no call opens nothing", test_hold_without_calls_opens_nothing)
     runner.run_test("Held connection error: refused, logged, closed", test_held_error_refuses)
+    runner.run_test("One-shot call frees the TLS context after", test_one_shot_frees_tls)
+    runner.run_test("One-shot error frees the TLS context", test_one_shot_error_frees_tls)
+    runner.run_test("Held calls free the TLS context on release", test_held_frees_tls_on_release)
+    runner.run_test("No server call frees nothing", test_no_server_call_frees_nothing)
     runner.final_report()
 
 

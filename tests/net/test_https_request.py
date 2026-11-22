@@ -398,6 +398,19 @@ def test_live_session_one_connection():
     assert made[0] == 1, '%d connections' % made[0]
 
 
+def test_forget_context_rebuilds():
+    saved = https._ctx
+    try:
+        https._ctx = None
+        first = https._context()
+        assert https._context() is first, 'context not cached'
+        https.forget_context()
+        assert https._ctx is None, 'context kept after forget'
+        assert https._context() is not first, 'context not rebuilt'
+    finally:
+        https._ctx = saved
+
+
 def run():
     from tests.net.wifi_join import join_first
     join_first()
@@ -420,4 +433,5 @@ def run():
     runner.run_test("Session.request refuses chunked replies", test_session_request_chunked_refused)
     runner.run_test("Session.request: body over max closes", test_session_request_over_max_closes)
     runner.run_test("Live: two calls on one kept connection", test_live_session_one_connection)
+    runner.run_test("forget_context() frees the context; next call rebuilds", test_forget_context_rebuilds)
     runner.final_report()

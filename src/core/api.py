@@ -89,6 +89,8 @@ def release():
         except Exception:
             pass
         _session = None
+        from net import https
+        https.forget_context()
 
 
 def _call(name, server, method, path, card=None, body=None, headers=None):
@@ -105,12 +107,16 @@ def _call(name, server, method, path, card=None, body=None, headers=None):
             sent.update(headers)
         url = server.rstrip('/') + path + '?mac=' + mac()
         from net import https   # loads TLS only once a card is checked
-        send = https.request
         if _held:
             if _session is None:
                 _session = https.Session()
-            send = _session.request
-        return send(method, url, sent, body, timeout_s=settings.API_TIMEOUT_S)
+            return _session.request(method, url, sent, body, timeout_s=settings.API_TIMEOUT_S)
+        try:
+            return https.request(method, url, sent, body, timeout_s=settings.API_TIMEOUT_S)
+        finally:
+            # Between taps the RAM goes back to the heap (a WiFi login on
+            # reconnect needs it); the next call builds the context again.
+            https.forget_context()
     except Exception as e:
         _log('%s: %r' % (name, e))
         return None

@@ -55,6 +55,13 @@ def _context():
     return _ctx
 
 
+def forget_context():
+    """Free the TLS context (~9 KB on the box); the next connection builds
+    it again (~27 ms). Open connections keep working."""
+    global _ctx
+    _ctx = None
+
+
 def _connect(host, timeout_s=None):
     """Open a verified TLS connection to 'host[:port]'; returns the stream.
 
