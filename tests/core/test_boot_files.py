@@ -121,7 +121,7 @@ def _run_file(path, system, pins=None, machine=None, recovery=None):
     saved = {name: sys.modules.get(name) for name in _SAVED}
     _FakePin.made = []
     try:
-        import core  # real package, so `core.system` resolves to the stub
+        import core  # noqa: F401  real package, so `core.system` resolves to the stub
         sys.modules['machine'] = machine if machine is not None else _FakeMachine([])
         sys.modules['core.system'] = system
         if pins is not None:

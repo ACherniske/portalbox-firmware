@@ -5,7 +5,6 @@ fed in chunks by a fake fetch. Every recovery path is moved under ROOT, so
 the box's real files are never touched.
 """
 import json
-import os
 import uhashlib as hashlib
 import ubinascii as binascii
 

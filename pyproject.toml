@@ -1,0 +1,7 @@
+[tool.ruff]
+# py38 keeps the formatter to syntax MicroPython can parse.
+target-version = "py38"
+extend-exclude = ["micropython", "build"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

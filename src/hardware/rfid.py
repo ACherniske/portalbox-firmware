@@ -1,7 +1,6 @@
 # hardware/rfid.py
 # Interface for MFRC522 RFID reader with debouncing and card management
 
-from machine import Pin
 from hardware.lib.mfrc522 import MFRC522
 import time
 

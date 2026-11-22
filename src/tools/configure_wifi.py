@@ -3,7 +3,6 @@
 Copy this to the ESP32 and run; call one of the helpers to write
 `/config/wifi_config.json` using the existing `net.models.WiFiConfig`.
 """
-import json
 from net.models import WiFiConfig
 
 def configure_wifi_psk(ssid, psk, bssid=None, wpa3=False):

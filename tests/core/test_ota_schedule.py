@@ -250,7 +250,8 @@ def run():
         assert fake.calls == [], "ran with a 2023 clock"
 
     def test_passes_abort():
-        stop = lambda: False
+        def stop():
+            return False
         fake = _Run()
         check(at_boot=False, idle_ms=600000, abort=stop, fake=fake)
         assert fake.calls == [(False, stop)], "calls %r" % (fake.calls,)

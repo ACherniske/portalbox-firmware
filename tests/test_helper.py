@@ -22,7 +22,7 @@ class TestRunner:
         try:
             self.np[0] = color
             self.np.write()
-        except:
+        except Exception:
             pass
 
     def run_test(self, name, test_func):

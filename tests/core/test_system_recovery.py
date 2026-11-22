@@ -371,7 +371,7 @@ def run():
         assert not _exists(recovery.STATE_PATH), "dev mode wrote state"
 
     def test_boot_returns_on_dev_wifi_fail():
-        rec = fake_boot(wifi_ok=False)
+        fake_boot(wifi_ok=False)
         patch.set(system, '_wifi_retry_reset', lambda *a, **k: None)
         main_calls = []
         patch.set(system, 'main', lambda: main_calls.append(1))

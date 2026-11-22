@@ -16,18 +16,18 @@ def run():
         
         # Setup and save
         config.set_wpa2_psk(test_ssid, test_pass)
-        assert config.save() == True, "Failed to save PSK config"
+        assert config.save() is True, "Failed to save PSK config"
 
         time.sleep(0.2)  # Small delay to ensure file system has time to write
         
         # Create new instance and load
         new_config = WiFiConfig()
-        assert new_config.load() == True, "Failed to load PSK config"
+        assert new_config.load() is True, "Failed to load PSK config"
         
         # Verify data integrity
         assert new_config.ssid == test_ssid
         assert new_config.network_type == NetworkType.WPA2_PSK
-        assert new_config.verify_password(test_pass) == True, "Password verification failed after load"
+        assert new_config.verify_password(test_pass) is True, "Password verification failed after load"
         assert new_config.get_decrypted_password() == test_pass, "Decryption failed after load"
 
     def test_save_load_enterprise():
@@ -47,18 +47,18 @@ def run():
         
         assert new_config.username == test_user
         assert new_config.identity == "anonymous@uni.edu"
-        assert new_config.verify_password(test_pass) == True
+        assert new_config.verify_password(test_pass) is True
 
     def test_missing_file():
         """Verifies behavior when no config file exists."""
         try:
             os.remove(WiFiConfig.CONFIG_FILE)
-        except:
+        except Exception:
             pass
             
         config = WiFiConfig()
         # Loading a non-existent file should return False, not crash
-        assert config.load() == False, "Load should return False if file is missing"
+        assert config.load() is False, "Load should return False if file is missing"
 
     def _read(path):
         try:
