@@ -71,6 +71,30 @@ A trainer's card followed by a card whose user is already authorized starts a
 second user is already authorized. Fixing this needs a server change: refuse
 training when the trainee is already authorized.
 
+## Load a box by cable
+
+The box runs precompiled modules (`.mpy`). Compiling `.py` files at boot takes
+memory that the first HTTPS connection then cannot get. `scripts/deploy.py`
+builds the modules and copies them over USB:
+
+```bash
+pip install mpremote pyserial
+export MPY_CROSS="wsl -e /home/<you>/micropython/mpy-cross/build/mpy-cross"
+py -3 scripts/deploy.py COM16            # --tests also copies tests/
+```
+
+- `MPY_CROSS` is the mpy-cross from BUILD_GUIDE.md Step 4, built from the same
+  MicroPython as the firmware (it must write `.mpy` v6.3). On Windows, run a
+  Linux build through WSL as shown.
+- It resets the box, stops it at the REPL before the app starts, compares every
+  file by its git hash, and copies only what differs.
+- It deletes each `X.py` that an `X.mpy` replaces (MicroPython loads the `.py`
+  first) and the old `manifest.json`.
+- It never overwrites the box's own `config/` files. `config/pins.py` and
+  `config/settings.py` are copied only to a box that has none. `boot.py`,
+  `main.py` and `recovery.py` stay `.py`.
+- Reset the box afterwards to boot it.
+
 ## Updates over WiFi (OTA)
 
 A box can update its own code from this GitHub repository.
@@ -152,7 +176,7 @@ mpremote connect COM16 exec "print(open('/log/events.log').read())"
 
 ### A box flashed by hand
 
-After copying `src/` to a box by cable, clear what it remembers about updates
+After loading a box by cable, clear what it remembers about updates
 (version, refused versions, trial, staged files). The live files stay as they are:
 
 ```python
