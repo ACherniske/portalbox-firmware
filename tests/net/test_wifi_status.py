@@ -38,13 +38,13 @@ class FakeNIC:
         return ('10.0.0.2', '255.255.255.0', '10.0.0.1', '10.0.0.1')
 
 
-def _manager(script, pre=1000, enterprise=False):
+def _manager(script, pre=1000, enterprise=False, timeout=6):
     config = WiFiConfig()
     if enterprise:
         config.set_eap_peap('net', 'user', 'pw', ca_cert_file=CA_FILE)
     else:
         config.set_wpa2_psk('net', 'password123')
-    config.timeout = 6
+    config.timeout = timeout
     mgr = WifiManager(config=config, verbose=False)
     mgr.nic = FakeNIC(script)
     mgr._sync_time = lambda: None   # no real network for NTP
@@ -68,12 +68,20 @@ def run():
         assert mgr.last_error == "Access point not found", "last_error is %r" % mgr.last_error
         assert mgr.status == NetworkStatus.NO_AP_FOUND, "status is %s" % mgr.status
 
-    def test_auth_fail_fails_fast():
-        mgr = _manager([1001, 202])   # 202 repeats
+    def test_auth_fail_waits_for_driver_retry():
+        # A 202 that never clears fails, but only after AUTH_FAIL_POLLS.
+        mgr = _manager([1001, 202], timeout=30)   # 202 repeats
         assert mgr._wait_for_connection() is False, "reported connected"
-        assert mgr.nic.polls == 1 + wifi.FAIL_POLLS, "took %d polls to fail" % mgr.nic.polls
+        assert mgr.nic.polls == 1 + wifi.AUTH_FAIL_POLLS, "took %d polls to fail" % mgr.nic.polls
         assert mgr.status == NetworkStatus.WRONG_PASSWORD, "status is %s" % mgr.status
         assert mgr.last_error == wifi._FAILURE_MESSAGES[202], "last_error is %r" % mgr.last_error
+
+    def test_auth_fail_after_reset_recovers():
+        # Measured after a reset: the access point rejects the first login
+        # (202 at 1.2 s) and the driver's own retry gets in ~4 s later.
+        mgr = _manager([1001, 202, 202, 202, 202, 1010], timeout=30)
+        assert mgr._wait_for_connection() is True, "gave up before the driver's retry: %r" % mgr.last_error
+        _stop_autosave()
 
     def test_stale_code_ignored():
         mgr = _manager([201, 201, 201, 1010], pre=201)
@@ -167,7 +175,8 @@ def run():
             assert not label.startswith('UNKNOWN'), "%s (%s) has no name" % (name, code)
 
     runner.run_test("No AP found fails fast", test_no_ap_fails_fast)
-    runner.run_test("Auth failure fails fast", test_auth_fail_fails_fast)
+    runner.run_test("Auth failure fails after AUTH_FAIL_POLLS", test_auth_fail_waits_for_driver_retry)
+    runner.run_test("Auth failure after a reset recovers", test_auth_fail_after_reset_recovers)
     runner.run_test("Stale pre-connect code ignored", test_stale_code_ignored)
     runner.run_test("Same code after CONNECTING still fails", test_repeat_code_after_connecting_fails)
     runner.run_test("Enterprise timeout says EAP", test_enterprise_timeout_message)
