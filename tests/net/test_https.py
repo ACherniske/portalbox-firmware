@@ -339,16 +339,67 @@ def test_http_url_refused():
 
 def test_follows_redirect_with_headers():
     def run(fake):
-        body = https.get('https://a.example/one', headers={'Authorization': 'Bearer t'})
+        body = https.get('https://a.example/one', headers={'Accept': 'x/y'})
         assert body == b'done', repr(body)
         assert len(fake.calls) == 2, fake.calls
         host, path, hdrs = fake.calls[1]
         assert (host, path) == ('b.example', '/two?x=1'), (host, path)
-        assert hdrs.get('Authorization') == 'Bearer t', hdrs
+        assert hdrs.get('Accept') == 'x/y', hdrs
         assert hdrs.get('User-Agent'), hdrs
         assert fake.all_closed(), 'stream left open'
     _with_fake([(301, {'location': 'https://b.example/two?x=1'}, b''),
                 (200, {'content-length': '4'}, b'done')], run)
+
+
+_AUTH = {'Authorization': 'Bearer t', 'Accept': 'x/y'}
+
+
+def test_redirect_other_host_drops_token():
+    """GitHub sends release downloads to another host: the token must
+    stay with api.github.com (and the signed URL refuses a second auth)."""
+    sent = dict(_AUTH)
+
+    def run(fake):
+        assert https.get('https://a.example/one', headers=sent) == b'done'
+        hdrs = fake.calls[1][2]
+        assert 'Authorization' not in hdrs, hdrs
+        assert hdrs.get('Accept') == 'x/y', hdrs
+        assert fake.calls[0][2].get('Authorization') == 'Bearer t', fake.calls[0]
+    _with_fake([(302, {'location': 'https://other.example/x'}, b''),
+                (200, {'content-length': '4'}, b'done')], run)
+    assert sent == _AUTH, "caller's headers changed: %r" % sent
+
+
+def test_redirect_same_host_keeps_token():
+    def run(fake):
+        assert https.get('https://a.example/one', headers=dict(_AUTH)) == b'done'
+        assert fake.calls[1][2].get('Authorization') == 'Bearer t', fake.calls[1]
+    _with_fake([(302, {'location': '/y'}, b''),
+                (200, {'content-length': '4'}, b'done')], run)
+
+
+def test_token_stays_dropped_after_return():
+    """Once off the first host, the token never comes back, even when a
+    later redirect points at the first host again."""
+    def run(fake):
+        assert https.get('https://a.example/one', headers=dict(_AUTH)) == b'done'
+        assert 'Authorization' not in fake.calls[2][2], fake.calls[2]
+    _with_fake([(302, {'location': 'https://b.example/x'}, b''),
+                (302, {'location': 'https://a.example/z'}, b''),
+                (200, {'content-length': '4'}, b'done')], run)
+
+
+def test_session_redirect_other_host_drops_token():
+    def run(s, fake):
+        sink = CountingSink(4)
+        s.get('https://a.example/one', dict(_AUTH), sink=sink)
+        assert sink.count == 4, sink.count
+        hdrs = fake.made[1].requests[0][1]
+        assert fake.made[1].host == 'other.example', fake.made[1].host
+        assert 'Authorization' not in hdrs, hdrs
+        assert hdrs.get('Accept') == 'x/y', hdrs
+    _with_session([[_reply(302, headers={'location': 'https://other.example/x'})],
+                   [_reply(200, b'done')]], run)
 
 
 def test_relative_redirect_stays_on_host():
@@ -811,6 +862,10 @@ def run():
     runner = TestRunner()
     runner.run_test("http URL refused", test_http_url_refused)
     runner.run_test("Follows redirect with headers", test_follows_redirect_with_headers)
+    runner.run_test("Redirect to another host drops the token", test_redirect_other_host_drops_token)
+    runner.run_test("Redirect on the same host keeps the token", test_redirect_same_host_keeps_token)
+    runner.run_test("Token stays dropped after returning", test_token_stays_dropped_after_return)
+    runner.run_test("Session redirect to another host drops the token", test_session_redirect_other_host_drops_token)
     runner.run_test("Three redirects allowed", test_three_redirects_allowed)
     runner.run_test("More than three redirects is an error", test_redirect_limit)
     runner.run_test("Redirect to http refused", test_redirect_to_http_refused)

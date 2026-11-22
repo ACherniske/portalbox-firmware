@@ -296,12 +296,23 @@ def request(method, url, headers=None, body=None, max_bytes=4096, timeout_s=None
         stream.close()
 
 
+def _for_host(sent, host, first):
+    """The headers for a hop to `host`: once a redirect leaves the first
+    host, Authorization is dropped for good. The token belongs to the API
+    host; GitHub's download host also refuses a second credential."""
+    if host == first:
+        return sent
+    return {k: v for k, v in sent.items() if k.lower() != 'authorization'}
+
+
 def _get(url, headers, read):
     sent = {'User-Agent': USER_AGENT}
     sent.update(headers or {})
+    first = _split(url)[0]
     for hop in range(MAX_REDIRECTS + 1):
         recovery.feed()
         host, path = _split(url)
+        sent = _for_host(sent, host, first)
         status, reply, stream = _request(host, path, sent)
         try:
             if status in _REDIRECTS and hop < MAX_REDIRECTS:
@@ -399,9 +410,11 @@ class Session:
     def _get(self, url, headers, read):
         sent = {'User-Agent': USER_AGENT}
         sent.update(headers or {})
+        first = _split(url)[0]
         for hop in range(MAX_REDIRECTS + 1):
             recovery.feed()
             host, path = _split(url)
+            sent = _for_host(sent, host, first)
             try:
                 status, reply = self._send(host, path, sent)
                 if status in _REDIRECTS and hop < MAX_REDIRECTS:
