@@ -338,8 +338,10 @@ class WifiManager:
             self.last_error = "Invalid password"
             return False
 
-        net_type = "WPA3-PSK" if self.config.wpa3 else "WPA2-PSK"
-        self._log(f"[WiFi] Connecting to {self.config.ssid} ({net_type})...")
+        if self.config.wpa3:
+            self._log("[WiFi] WARNING: wpa3 is set but not enforced; "
+                      "the access point picks WPA2 or WPA3")
+        self._log(f"[WiFi] Connecting to {self.config.ssid} (WPA2-PSK)...")
 
         try:
             # The firmware's connect() takes ssid and key positionally only,

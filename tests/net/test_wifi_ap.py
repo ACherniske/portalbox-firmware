@@ -161,8 +161,28 @@ def run():
         assert args == ('net', 'password123'), "connect args %r" % (args,)
         assert kw.get('bssid') == STRONG, "bssid %r" % (kw.get('bssid'),)
 
+    def test_wpa3_setting_warned():
+        # The firmware has no WPA3 switch: say so instead of claiming WPA3.
+        config = WiFiConfig()
+        config.set_wpa3_psk('net', 'password123')
+        mgr = _manager([[_ap(b'net', STRONG, -63)]], config)
+        logs = []
+        mgr._log = logs.append
+        _connect(mgr)
+        assert any('WARNING' in m and 'wpa3' in m for m in logs), "no warning: %r" % (logs,)
+        assert not any('WPA3-PSK' in m for m in logs), "claims WPA3: %r" % (logs,)
+
+    def test_wpa2_no_wpa3_warning():
+        mgr = _manager([[_ap(b'net', STRONG, -63)]])
+        logs = []
+        mgr._log = logs.append
+        _connect(mgr)
+        assert not any('wpa3' in m.lower() for m in logs), "wpa3 logged: %r" % (logs,)
+
     runner.run_test("WPA2-PSK passes the key positionally", test_psk_key_positional)
     runner.run_test("WPA3-PSK connects with the firmware's arguments", test_wpa3_psk_connects)
+    runner.run_test("wpa3 in the config: warned, not claimed", test_wpa3_setting_warned)
+    runner.run_test("WPA2-PSK: no wpa3 warning", test_wpa2_no_wpa3_warning)
     runner.run_test("Joins the strongest AP of the network", test_joins_strongest)
     runner.run_test("No matching AP connects without bssid", test_no_match_no_bssid)
     runner.run_test("Scan error connects without bssid", test_scan_error_no_bssid)
