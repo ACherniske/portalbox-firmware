@@ -3,6 +3,7 @@ from tests.test_helper import TestRunner
 import recovery
 import core.device as device_mod
 import core.main as app_main
+from core import api
 
 
 class _Patch:
@@ -137,10 +138,57 @@ def run():
         patch.set(app_main, 'DeviceFSM', FakeFSM)
         patch.set(app_main, 'cleanup_device', lambda: None)
         patch.set(app_main.Application, '_ota_loop', no_loop)
+        patch.set(api, 'startup', lambda: 'ok')
         asyncio.run(app_main.Application().run())
         assert len(got) == 1 and got[0] is not None, "mark_healthy %r" % (got,)
         got[0]()
         assert marked == [], "FSM's mark_healthy skips the hardware check"
+
+    # --- startup report: once, before the FSM; never stops the app -------
+
+    def run_app_with_startup(startup):
+        """Run the app with fakes; returns the events in order."""
+        events = []
+
+        class FakeFSM:
+            async def run(self, mark_healthy=None, healthy_after_ms=None):
+                events.append('fsm')
+
+            def stop(self):
+                pass
+
+        async def no_loop(self, every_ms=0):
+            pass
+
+        def fake_startup():
+            events.append('startup')
+            return startup()
+
+        dev = FakeDevice()
+        patch.set(app_main, 'get_device', lambda: dev)
+        patch.set(app_main, 'DeviceFSM', FakeFSM)
+        patch.set(app_main, 'cleanup_device', lambda: None)
+        patch.set(app_main.Application, '_ota_loop', no_loop)
+        patch.set(api, 'startup', fake_startup)
+        asyncio.run(app_main.Application().run())
+        return events
+
+    def test_startup_before_fsm():
+        events = run_app_with_startup(lambda: 'ok')
+        assert events == ['startup', 'fsm'], "events %r" % (events,)
+        assert any(tag == 'app' and 'ok' in msg for tag, msg in logged), "no log: %r" % logged
+
+    def test_startup_refused_keeps_running():
+        events = run_app_with_startup(lambda: 'not registered')
+        assert events == ['startup', 'fsm'], "events %r" % (events,)
+        assert any(tag == 'app' and 'not registered' in msg for tag, msg in logged),             "no log: %r" % logged
+
+    def test_startup_error_keeps_running():
+        def boom():
+            raise OSError(113)
+        events = run_app_with_startup(boom)
+        assert events == ['startup', 'fsm'], "events %r" % (events,)
+        assert any(tag == 'app' and 'OSError' in msg for tag, msg in logged),             "no log: %r" % logged
 
     # --- item 8b: an error in one idle check doesn't end the OTA loop -------
 
@@ -168,6 +216,9 @@ def run():
         ("Not healthy without the relay", test_no_relay_not_healthy),
         ("FSM gets the hardware health check", test_fsm_gets_health_check),
         ("OTA loop survives a failed check", test_ota_loop_survives_error),
+        ("Startup report goes to the server before the FSM", test_startup_before_fsm),
+        ("Box not registered: logged, app keeps running", test_startup_refused_keeps_running),
+        ("Startup report error: logged, app keeps running", test_startup_error_keeps_running),
     ]
     for name, test in tests:
         runner.run_test(name, fresh(test))
