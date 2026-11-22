@@ -32,6 +32,11 @@ def _release():
 # driver keeps retrying and can recover from a brief NO_AP_FOUND or auth fail.
 FAIL_POLLS = 3
 
+# An auth failure (202) gets longer. After a reset without a clean disconnect
+# (power cut, crash), the access point still holds the old association and
+# rejects the first login; the driver's own retry gets in ~4 s later.
+AUTH_FAIL_POLLS = 8
+
 
 def _strongest_bssid(networks, ssid):
     """BSSID of the strongest AP in WLAN.scan() results named ssid, or None.
@@ -388,7 +393,8 @@ class WifiManager:
             message = _FAILURE_MESSAGES.get(status)
             if message and (seen_connecting or status != self._pre_status):
                 fail_count += 1
-                if fail_count >= FAIL_POLLS:
+                limit = AUTH_FAIL_POLLS if status == NetworkStatus.WRONG_PASSWORD else FAIL_POLLS
+                if fail_count >= limit:
                     self.last_error = message
                     self.status = status
                     self._log(f"[WiFi] FAILED: {self.last_error}")
