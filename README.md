@@ -110,8 +110,8 @@ A box can update its own code from this GitHub repository.
   first and writes only the files that differ from its own to flash, each
   checked against its hash before anything is installed. It deletes each old
   `X.py` that an `X.mpy` replaces. The server certificate is checked
-  (`src/certs/github_roots.pem`), and the token goes only to `api.github.com`,
-  never to GitHub's download host. A download that drops (network error,
+  (`src/certs/github_roots.pem`), and a token, if set, goes only to
+  `api.github.com`, never to GitHub's download host. A download that drops (network error,
   server error) starts over once. A bundle built for another MicroPython
   (`.mpy` version) is refused.
 - **Trial:** the box restarts into the new version. After 60 seconds of the app
@@ -129,14 +129,18 @@ At the box's REPL:
 
 ```python
 from net import ota
-ota.create_config(user='ACherniske', repository='portalbox-firmware',
-                  token='<token>', enabled=True)
+ota.create_config(user='ACherniske', repository='portalbox-firmware', enabled=True)
 ```
 
 - The box follows the latest release of that repository.
-- `token` is needed while the repository is private: a fine-grained GitHub
-  token with read-only access to this repository's contents. It is stored only
-  on the box, in `/config/ota_config.json`. Never commit it.
+- This repository is public, so the box needs no token. Without one, GitHub
+  allows 60 API calls an hour from each public IP address. A box makes a few
+  calls per check and checks about once a day, so that limit only matters
+  for many boxes behind one address checking at the same time.
+- A private repository (or a private fork) needs `token='<token>'`: a
+  fine-grained GitHub token with read-only access to that repository's
+  contents. It is stored only on the box, in `/config/ota_config.json`. Never
+  commit it.
 - To turn updates off, run `create_config` again with `enabled=False`.
 
 ### Release a new version
