@@ -133,7 +133,10 @@ def _ok(name, reply):
 
 
 def _timeout_ms(minutes):
-    """The equipment's timeout: minutes -> ms, 0 = no limit, else None."""
+    """The equipment's timeout: minutes -> ms, 0 = no limit, else None.
+    The minutes may come as an int or a string of digits."""
+    if type(minutes) is str and minutes.isdigit():
+        minutes = int(minutes)
     if type(minutes) is int and minutes >= 0:
         return minutes * 60000
     return None

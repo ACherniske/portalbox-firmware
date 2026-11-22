@@ -159,7 +159,9 @@ def run():
     def test_activate_timeouts():
         for timeout, want in ((30, (True, 1800000)), (1, (True, 60000)), (0, (True, 0)),
                               (None, (True, None)), ('abc', (True, None)),
-                              (-5, (True, None)), (True, (True, None))):
+                              (-5, (True, None)), (True, (True, None)),
+                              ('10', (True, 600000)), ('0', (True, 0)), ('-5', (True, None)),
+                              ('', (True, None)), ('1.5', (True, None))):
             def check(server, logs):
                 got = api.activate(USER)
                 assert got == want, "timeout %r -> %r, want %r" % (timeout, got, want)
