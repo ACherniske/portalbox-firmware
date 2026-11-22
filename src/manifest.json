@@ -16,6 +16,7 @@
   "src/certs/github_roots.pem",
 
   "src/core/api.py",
+  "src/core/api_mock.py",
   "src/core/device.py",
   "src/core/feedback.py",
   "src/core/fsm.py",
