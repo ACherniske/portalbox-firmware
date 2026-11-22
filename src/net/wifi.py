@@ -1,4 +1,5 @@
 import esp32
+import gc
 import network
 import time
 
@@ -337,20 +338,21 @@ class WifiManager:
             self.last_error = "Invalid password"
             return False
 
-        net_type = "WPA3-PSK" if self.config.wpa3 else "WPA2-PSK"
-        self._log(f"[WiFi] Connecting to {self.config.ssid} ({net_type})...")
+        if self.config.wpa3:
+            self._log("[WiFi] WARNING: wpa3 is set but not enforced; "
+                      "the access point picks WPA2 or WPA3")
+        self._log(f"[WiFi] Connecting to {self.config.ssid} (WPA2-PSK)...")
 
         try:
-            connect_params = {'key': password}
+            # The firmware's connect() takes ssid and key positionally only,
+            # and has no WPA3 switch: the driver picks WPA2 or WPA3 from
+            # what the access point offers.
+            connect_params = {}
 
             if self._bssid:
                 connect_params['bssid'] = self._bssid
 
-            if self.config.wpa3:
-                connect_params['wpa3'] = True
-                self._log("[WiFi] Enforcing WPA3 authentication")
-
-            self.nic.connect(self.config.ssid, **connect_params)
+            self.nic.connect(self.config.ssid, password, **connect_params)
             self._log("[WiFi] Connection initiated")
             self.status = NetworkStatus.CONNECTING
             return True
@@ -452,6 +454,11 @@ class WifiManager:
         # after power-on. Move it up to the floor before any login attempt.
         if clock.apply_floor():
             self._log(f"[WiFi] Clock was behind; set to floor {time.localtime()[:3]}")
+
+        # The WPA2-Enterprise login needs ESP-IDF RAM; a fragmented MicroPython
+        # heap that grows mid-login takes it ('WiFi Out of Memory'). Collect
+        # first, so a reconnect while the app runs starts like the one at boot.
+        gc.collect()
 
         # Free RAM before each login: too little makes the login stall
         # silently, so the log shows it when a box can't connect. The event

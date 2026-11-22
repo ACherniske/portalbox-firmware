@@ -2,6 +2,7 @@
 secrets.py
 wifi_config.json
 ota_config.json
+api_config.json
 ca-cert.pem
 
 # Python cache

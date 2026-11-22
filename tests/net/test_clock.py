@@ -102,7 +102,7 @@ def run():
         class FakeNIC:
             def active(self, *a):
                 return True
-            def connect(self, ssid, **kw):
+            def connect(self, ssid, key=None, **kw):
                 pass
             def status(self, *a):
                 return 1010

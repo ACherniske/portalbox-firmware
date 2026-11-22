@@ -7,6 +7,7 @@ import uasyncio as asyncio
 
 import recovery
 import core.device as device_mod
+from core import api
 from core.device import get_device, cleanup_device
 from core.fsm import DeviceFSM
 
@@ -60,7 +61,21 @@ class Application:
         # Initialize FSM
         self.fsm = DeviceFSM()
 
+        self._report_startup()
+
         print("[APP] Application initialization complete")
+
+    def _report_startup(self):
+        """Tell the server the box is up and log its answer. Informational
+        only: a failure never stops the box, since every card tap asks the
+        server again."""
+
+        try:
+            result = api.startup()
+        except Exception as e:
+            result = 'error %s' % (repr(e),)
+        print("[APP] Server startup report: %s" % result)
+        recovery.log('app', 'server startup: %s' % result)
 
     # =========================================================================
     # Main Runtime

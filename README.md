@@ -4,6 +4,73 @@ MicroPython firmware for PortalBox access-control boxes (ESP32-S3). It runs on a
 MicroPython fork with WPA2-Enterprise WiFi support; see [BUILD_GUIDE.md](BUILD_GUIDE.md)
 to build and flash it. The code that goes on the box is in `src/`.
 
+## Maker Portal server
+
+The box asks the Maker Portal server before it powers the tool. Each card tap
+is a server call. If the server can't be reached or says no, the tool stays off.
+
+### Point the box at the server
+
+Copy `config/example_api_config.json` to `/config/api_config.json` on the box
+and put in the server's address:
+
+```json
+{
+    "url": "https://makerportal.example.edu"
+}
+```
+
+The address lives only on the box, never in this repository. Without the file,
+the box refuses every card. `"url": ""` uses built-in test cards instead of a
+server; use it only on a bench.
+
+The box checks the server's certificate against the roots in
+`/certs/github_roots.pem`: ISRG Root X1 (Let's Encrypt) and USERTrust ECC. A
+server whose certificate chains to any other root fails every TLS handshake,
+and the box refuses every card. Check the server's chain before you deploy.
+
+### Set up the box on the portal
+
+1. **Find the box's MAC address.** It's 12 lowercase hex digits, no colons
+   (for example `a1b2c3d4e5f6`):
+   ```bash
+   mpremote connect COM16 exec "from core import api; print(api.mac())"
+   ```
+2. **Add the box as equipment** on the portal with that MAC address, choose its
+   equipment type, and mark it **in service**.
+3. **Authorize users** for that equipment type. The portal stores a card as the
+   decimal number of its UID: UID `23BE9603` is card `599692803`.
+4. **Proxy cards:** turn on **allow proxy** for the equipment type. Without it, a
+   proxy card tapped during a user's grace period is refused, the user's session
+   ends, and the box turns red.
+5. **Training:** a trainer is a user whose role may create equipment
+   authorizations. A trainer's card, then a trainee's card in the grace period,
+   starts a training session.
+
+### Startup report
+
+After WiFi connects, the box tells the server it has started and prints the
+answer, for example `[APP] Server startup report: ok`. The same line goes to
+`/log/events.log` as `server startup: ok`.
+
+| Answer | Meaning |
+|---|---|
+| `ok` | The server knows the box and it's in service. |
+| `not registered` | No equipment on the portal has this box's MAC address. |
+| `out of service` | The equipment is marked out of service. |
+| `error` | No WiFi, no `/config/api_config.json`, or the server didn't answer. |
+
+The box keeps running whatever the answer, but it can't power the tool until
+the server accepts its cards.
+
+### Known server limit
+
+A trainer's card followed by a card whose user is already authorized starts a
+**training** session, not a hand-off to that user. The server answers
+"training" whenever the first user may train, without checking whether the
+second user is already authorized. Fixing this needs a server change: refuse
+training when the trainee is already authorized.
+
 ## Updates over WiFi (OTA)
 
 A box can update its own code from this GitHub repository.

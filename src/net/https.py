@@ -1,7 +1,7 @@
-"""HTTPS GET that checks the server certificate.
+"""HTTPS requests that check the server certificate.
 
 The fork's requests module turns certificate checks off, so OTA downloads
-use this instead. The server must chain to a root in ROOTS_PATH and match
+and the Maker Portal API use this instead. The server must chain to a root in ROOTS_PATH and match
 the host name; anything else raises before a byte of the body is read.
 """
 import io
@@ -55,8 +55,18 @@ def _context():
     return _ctx
 
 
-def _connect(host):
-    """Open a verified TLS connection to 'host[:port]'; returns the stream."""
+def forget_context():
+    """Free the TLS context (~9 KB on the box); the next connection builds
+    it again (~27 ms). Open connections keep working."""
+    global _ctx
+    _ctx = None
+
+
+def _connect(host, timeout_s=None):
+    """Open a verified TLS connection to 'host[:port]'; returns the stream.
+
+    timeout_s (default TIMEOUT_S) bounds each socket step on its own.
+    """
     name, _, port = host.partition(':')
     port = int(port) if port else 443
     ctx = _context()
@@ -64,7 +74,7 @@ def _connect(host):
     recovery.feed()   # DNS, then connect, each can be slow
     sock = socket.socket()
     try:
-        sock.settimeout(TIMEOUT_S)
+        sock.settimeout(TIMEOUT_S if timeout_s is None else timeout_s)
         sock.connect(addr)
         # Connect and the handshake can each take up to TIMEOUT_S: two in
         # a row would pass the 30 s watchdog.
@@ -77,16 +87,20 @@ def _connect(host):
     return stream
 
 
-def _exchange(stream, host, path, headers, version):
-    """Send the GET on stream and read the reply head.
+def _exchange(stream, host, path, headers, version, method='GET', body=None):
+    """Send the request (GET unless method says otherwise) on stream and
+    read the reply head. A body goes out after the head as given; the
+    caller puts its Content-Length in headers.
 
     Returns (status, headers with lower-case names); the stream is left
     at the body. Does not close the stream.
     """
-    lines = ['GET %s %s' % (path, version), 'Host: %s' % host]
+    lines = ['%s %s %s' % (method, path, version), 'Host: %s' % host]
     for key, value in headers.items():
         lines.append('%s: %s' % (key, value))
     stream.write(('\r\n'.join(lines) + '\r\n\r\n').encode())
+    if body:
+        stream.write(body)
     parts = stream.readline().split(None, 2)
     if len(parts) < 2 or not parts[0].startswith(b'HTTP/'):
         raise HttpError(0, 'bad status line')
@@ -203,6 +217,36 @@ def get_json(url, headers=None, max_bytes=65536):
     return _get(url, headers, lambda stream, reply: json.load(_JsonBody(stream, reply, max_bytes)))
 
 
+def _body_bytes(body):
+    if body is None:
+        return b''
+    if isinstance(body, str):
+        return body.encode()
+    return body
+
+
+def request(method, url, headers=None, body=None, max_bytes=4096, timeout_s=None):
+    """Send one request (PUT, POST, DELETE...) and return (status, body bytes).
+
+    Any status comes back as is: the caller decides what a 401 or 409
+    means. Redirects are not followed. body may be str or bytes and goes
+    out with Content-Length (0 without one). timeout_s (default TIMEOUT_S)
+    bounds each socket step. Network and TLS errors raise; a body over
+    max_bytes or shorter than Content-Length -> HttpError(0).
+    """
+    host, path = _split(url)
+    body = _body_bytes(body)
+    sent = {'User-Agent': USER_AGENT, 'Content-Length': str(len(body))}
+    sent.update(headers or {})
+    recovery.feed()
+    stream = _connect(host, timeout_s)
+    try:
+        status, reply = _exchange(stream, host, path, sent, 'HTTP/1.0', method, body)
+        return status, _read_body(stream, reply, None, max_bytes)
+    finally:
+        stream.close()
+
+
 def _get(url, headers, read):
     sent = {'User-Agent': USER_AGENT}
     sent.update(headers or {})
@@ -257,23 +301,51 @@ class Session:
         self.stream = None
         self.host = None
 
-    def _send(self, host, path, headers):
+    def request(self, method, url, headers=None, body=None, max_bytes=4096, timeout_s=None):
+        """Like https.request(), on the kept connection.
+
+        A request that fails on a reused connection is not sent again: it
+        may have reached the server. It raises like any network error, and
+        the next call opens a new connection.
+        """
+        host, path = _split(url)
+        body = _body_bytes(body)
+        sent = {'User-Agent': USER_AGENT, 'Content-Length': str(len(body))}
+        sent.update(headers or {})
+        recovery.feed()
+        try:
+            status, reply = self._send(host, path, sent, method, body, timeout_s, resend=False)
+            if 'chunked' in reply.get('transfer-encoding', '').lower():
+                raise HttpError(0, 'chunked reply')
+            data = _read_body(self.stream, reply, None, max_bytes)
+        except BaseException:
+            self.close()
+            raise
+        self._close_if_done(reply)
+        return status, data
+
+    def _close_if_done(self, reply):
+        if ('content-length' not in reply
+                or reply.get('connection', '').lower() == 'close'):
+            self.close()
+
+    def _send(self, host, path, headers, method='GET', body=None, timeout_s=None, resend=True):
         if self.stream is not None and self.host != host:
             self.close()
         reused = self.stream is not None
         if not reused:
-            self.stream = _connect(host)
+            self.stream = _connect(host, timeout_s)
             self.host = host
         try:
-            return _exchange(self.stream, host, path, headers, 'HTTP/1.1')
+            return _exchange(self.stream, host, path, headers, 'HTTP/1.1', method, body)
         except (OSError, HttpError):
             self.close()
-            if not reused:
+            if not reused or not resend:
                 raise
         # The server closed the kept connection while it sat idle.
-        self.stream = _connect(host)
+        self.stream = _connect(host, timeout_s)
         self.host = host
-        return _exchange(self.stream, host, path, headers, 'HTTP/1.1')
+        return _exchange(self.stream, host, path, headers, 'HTTP/1.1', method, body)
 
     def _get(self, url, headers, read):
         sent = {'User-Agent': USER_AGENT}
@@ -297,7 +369,5 @@ class Session:
             except BaseException:
                 self.close()
                 raise
-            if ('content-length' not in reply
-                    or reply.get('connection', '').lower() == 'close'):
-                self.close()
+            self._close_if_done(reply)
             return result
