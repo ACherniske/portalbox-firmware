@@ -17,14 +17,12 @@ from hardware.buzzer import Buzzer
 
 BUZZER_PIN = 4
 
-buzzer = Buzzer(
-    pin_num=BUZZER_PIN,
-    enabled=True
-)
+buzzer = Buzzer(pin_num=BUZZER_PIN, enabled=True)
 
 # =========================================================
 # Test Routine
 # =========================================================
+
 
 async def buzzer_test():
     print("Starting buzzer test...")
@@ -44,11 +42,7 @@ async def buzzer_test():
 
     print("Triple beep")
 
-    triple_pattern = (
-        100,
-        100,
-        100
-    )
+    triple_pattern = (100, 100, 100)
 
     buzzer.play(triple_pattern)
 
@@ -60,15 +54,9 @@ async def buzzer_test():
 
     print("Continuous warning beep")
 
-    warning_pattern = (
-        300,
-    )
+    warning_pattern = (300,)
 
-    buzzer.play(
-        warning_pattern,
-        continuous=True,
-        interval_ms=500
-    )
+    buzzer.play(warning_pattern, continuous=True, interval_ms=500)
 
     await asyncio.sleep(5)
 

@@ -14,12 +14,7 @@ class Button:
     - Active-high or active-low buttons
     """
 
-    def __init__(
-        self,
-        pin_num: int,
-        pull_up: bool = True,
-        active_high: bool = True
-    ):
+    def __init__(self, pin_num: int, pull_up: bool = True, active_high: bool = True):
         """
         Initialize button.
 

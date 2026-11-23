@@ -4,6 +4,7 @@ Each file goes straight to flash while its git blob SHA-1 is worked out,
 so no file is ever held whole in RAM. Nothing here touches the live files:
 recovery.install() swaps the staged copies in.
 """
+
 import os
 import sys
 import json
@@ -13,12 +14,12 @@ import ubinascii as binascii
 import recovery
 from net.ota_target import OtaError
 
-MARGIN = 32768      # left free after staging, for the log, state and journal
+MARGIN = 32768  # left free after staging, for the log, state and journal
 CHUNK = 1024
 
 
 def _blob_hash(size):
-    return hashlib.sha1(('blob %d\0' % size).encode())
+    return hashlib.sha1(("blob %d\0" % size).encode())
 
 
 def _hex(h):
@@ -38,7 +39,7 @@ class _Sink:
 
     def write(self, chunk):
         if self.count + len(chunk) > self.size:
-            raise OtaError('bad hash ' + self.path)
+            raise OtaError("bad hash " + self.path)
         self.f.write(chunk)
         self.hash.update(chunk)
         self.count += len(chunk)
@@ -51,7 +52,7 @@ def file_sha(path):
     except OSError:
         return None
     h = _blob_hash(size)
-    with open(path, 'rb') as f:
+    with open(path, "rb") as f:
         while True:
             chunk = f.read(CHUNK)
             if not chunk:
@@ -61,16 +62,16 @@ def file_sha(path):
 
 
 def free_space():
-    stat = os.statvfs('/')
+    stat = os.statvfs("/")
     return stat[0] * stat[3]
 
 
 def space_needed(files):
     """Flash the staged files take: each rounded up to whole blocks, two
     metadata blocks per folder (LittleFS), plus MARGIN."""
-    block = os.statvfs('/')[0]
+    block = os.statvfs("/")[0]
     total = sum(-(-size // block) * block for _, _, size in files)
-    folders = set(p.rsplit('/', 1)[0] if '/' in p else '' for p, _, _ in files)
+    folders = set(p.rsplit("/", 1)[0] if "/" in p else "" for p, _, _ in files)
     return total + 2 * block * len(folders) + MARGIN
 
 
@@ -80,7 +81,7 @@ def _transient(e):
     hash or running out of memory."""
     if isinstance(e, OSError):
         return True
-    status = getattr(e, 'status', None)
+    status = getattr(e, "status", None)
     return status is not None and (status == 0 or status >= 500)
 
 
@@ -95,7 +96,7 @@ HEADER_MAX = 8192
 def firmware_mpy():
     """The .mpy version this firmware loads, e.g. '6.3'."""
     v = sys.implementation._mpy
-    return '%d.%d' % (v & 0xff, (v >> 8) & 3)
+    return "%d.%d" % (v & 0xFF, (v >> 8) & 3)
 
 
 def parse_header(line):
@@ -107,19 +108,23 @@ def parse_header(line):
     try:
         h = json.loads(line)
         files = []
-        for path, size, sha in h['files']:
-            if not (isinstance(path, str) and isinstance(size, int) and size >= 0
-                    and isinstance(sha, str)):
+        for path, size, sha in h["files"]:
+            if not (
+                isinstance(path, str)
+                and isinstance(size, int)
+                and size >= 0
+                and isinstance(sha, str)
+            ):
                 raise ValueError
             files.append((path, size, sha))
-        ok = h['format'] == BUNDLE_FORMAT and isinstance(h['version'], str)
+        ok = h["format"] == BUNDLE_FORMAT and isinstance(h["version"], str)
     except (ValueError, KeyError, TypeError):
-        raise OtaError('bad bundle')
+        raise OtaError("bad bundle")
     if not ok:
-        raise OtaError('bad bundle')
-    if h.get('mpy') != firmware_mpy():
-        raise OtaError('mpy %s, box %s' % (h.get('mpy'), firmware_mpy()))
-    return {'version': h['version'], 'files': files}
+        raise OtaError("bad bundle")
+    if h.get("mpy") != firmware_mpy():
+        raise OtaError("mpy %s, box %s" % (h.get("mpy"), firmware_mpy()))
+    return {"version": h["version"], "files": files}
 
 
 class _BundleSink:
@@ -131,26 +136,26 @@ class _BundleSink:
         self.plan_for = plan_for
         self.abort = abort
         self.free_bytes = free_bytes
-        self.head = b''       # header bytes until the newline; None after
+        self.head = b""  # header bytes until the newline; None after
         self.plan = None
         self.files = []
         self.keep = {}
-        self.index = 0        # file being read
-        self.left = 0         # its bytes still to come
+        self.index = 0  # file being read
+        self.left = 0  # its bytes still to come
         self.f = None
         self.sink = None
 
     def write(self, chunk):
         if self.abort and self.abort():
-            raise OtaError('aborted')
+            raise OtaError("aborted")
         if self.head is not None:
             self.head += chunk
-            end = self.head.find(b'\n')
+            end = self.head.find(b"\n")
             if end < 0 or end >= HEADER_MAX:
                 if end >= HEADER_MAX or len(self.head) > HEADER_MAX:
-                    raise OtaError('bad bundle')
+                    raise OtaError("bad bundle")
                 return
-            line, chunk = self.head[:end], self.head[end + 1:]
+            line, chunk = self.head[:end], self.head[end + 1 :]
             self.head = None
             self._start(parse_header(line))
         self._body(chunk)
@@ -158,11 +163,11 @@ class _BundleSink:
     def _start(self, header):
         plan = self.plan_for(header)
         free = free_space() if self.free_bytes is None else self.free_bytes
-        if space_needed(plan['files']) > free:
-            raise OtaError('no space')
+        if space_needed(plan["files"]) > free:
+            raise OtaError("no space")
         self.plan = plan
-        self.keep = set(p for p, _, _ in plan['files'])
-        self.files = header['files']
+        self.keep = set(p for p, _, _ in plan["files"])
+        self.files = header["files"]
         self.index = -1
         self._next()
 
@@ -175,9 +180,9 @@ class _BundleSink:
             path, size, _ = self.files[self.index]
             self.left = size
             if path in self.keep:
-                dest = recovery.STAGE_DIR + '/' + path
+                dest = recovery.STAGE_DIR + "/" + path
                 recovery._make_parent(dest)
-                self.f = open(dest, 'wb')
+                self.f = open(dest, "wb")
                 self.sink = _Sink(self.f, path, size)
             if size:
                 return
@@ -191,17 +196,17 @@ class _BundleSink:
             self.f = None
             if self.sink.count != size or _hex(self.sink.hash) != sha:
                 self.sink = None
-                raise OtaError('bad hash ' + path)
+                raise OtaError("bad hash " + path)
             self.sink = None
 
     def _body(self, data):
         pos = 0
         while pos < len(data):
             if self.index >= len(self.files):
-                raise OtaError('bundle too long')
+                raise OtaError("bundle too long")
             take = min(self.left, len(data) - pos)
             if self.sink is not None:
-                self.sink.write(data[pos:pos + take])
+                self.sink.write(data[pos : pos + take])
             self.left -= take
             pos += take
             if self.left == 0:
@@ -211,7 +216,7 @@ class _BundleSink:
     def finish(self):
         """The body ended: every file must have come."""
         if self.head is not None or self.index < len(self.files):
-            raise OtaError('short bundle')
+            raise OtaError("short bundle")
 
     def close(self):
         if self.f is not None:
@@ -233,7 +238,7 @@ def stage_bundle(fetch, plan_for, abort=None, free_bytes=None):
     """
     try:
         for attempt in (1, 2):
-            recovery._rm_tree(recovery.STAGE_DIR)   # leftovers, or the dropped try
+            recovery._rm_tree(recovery.STAGE_DIR)  # leftovers, or the dropped try
             sink = _BundleSink(plan_for, abort, free_bytes)
             try:
                 fetch(sink)
@@ -247,5 +252,5 @@ def stage_bundle(fetch, plan_for, abort=None, free_bytes=None):
         try:
             recovery._rm_tree(recovery.STAGE_DIR)
         except OSError:
-            pass   # keep the first error; the next run clears the stage first
+            pass  # keep the first error; the next run clears the stage first
         raise

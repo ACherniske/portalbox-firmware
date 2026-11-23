@@ -18,53 +18,53 @@ class MFRC522:
     NO_CARD = 2
 
     # MFRC522 commands - control the reader's internal operations
-    PCD_IDLE = 0x00          # No action, cancels current command execution
-    PCD_AUTHENT = 0x0E       # Performs authentication with MIFARE card
-    PCD_RECEIVE = 0x08       # Activates the receiver circuits
-    PCD_TRANSMIT = 0x04      # Transmits data from FIFO buffer
-    PCD_TRANSCEIVE = 0x0C    # Transmits data and activates receiver
-    PCD_RESET_PHASE = 0x0F   # Resets the MFRC522 to power-on state
-    PCD_CAL_CRC = 0x03       # Activates CRC coprocessor for data integrity
+    PCD_IDLE = 0x00  # No action, cancels current command execution
+    PCD_AUTHENT = 0x0E  # Performs authentication with MIFARE card
+    PCD_RECEIVE = 0x08  # Activates the receiver circuits
+    PCD_TRANSMIT = 0x04  # Transmits data from FIFO buffer
+    PCD_TRANSCEIVE = 0x0C  # Transmits data and activates receiver
+    PCD_RESET_PHASE = 0x0F  # Resets the MFRC522 to power-on state
+    PCD_CAL_CRC = 0x03  # Activates CRC coprocessor for data integrity
 
     # MIFARE card commands - sent to RFID cards
-    PICC_REQ_IDL = 0x26      # Request command for cards in idle state
-    PICC_REQ_ALL = 0x52      # Request command for all cards
-    PICC_ANTI_COLL = 0x93    # Anti-collision command
+    PICC_REQ_IDL = 0x26  # Request command for cards in idle state
+    PICC_REQ_ALL = 0x52  # Request command for all cards
+    PICC_ANTI_COLL = 0x93  # Anti-collision command
     PICC_SELECT_CARD = 0x93  # Select a specific card after anti-collision
-    PICC_AUTHENT1A = 0x60    # Authentication with key A (most common)
-    PICC_AUTHENT1B = 0x61    # Authentication with key B (alternative key)
-    PICC_READ = 0x30         # Read 16 bytes from a memory block
-    PICC_WRITE = 0xA0        # Write 16 bytes to a memory block
-    PICC_DECREMENT = 0xC0    # Decrement value in a value block
-    PICC_INCREMENT = 0xC1    # Increment value in a value block
-    PICC_RESTORE = 0xC2      # Restore value from backup to value block
-    PICC_TRANSFER = 0xB0     # Transfer value from internal register to block
-    PICC_HALT = 0x50         # Put card into halt state
+    PICC_AUTHENT1A = 0x60  # Authentication with key A (most common)
+    PICC_AUTHENT1B = 0x61  # Authentication with key B (alternative key)
+    PICC_READ = 0x30  # Read 16 bytes from a memory block
+    PICC_WRITE = 0xA0  # Write 16 bytes to a memory block
+    PICC_DECREMENT = 0xC0  # Decrement value in a value block
+    PICC_INCREMENT = 0xC1  # Increment value in a value block
+    PICC_RESTORE = 0xC2  # Restore value from backup to value block
+    PICC_TRANSFER = 0xB0  # Transfer value from internal register to block
+    PICC_HALT = 0x50  # Put card into halt state
 
     # MFRC522 registers - memory addresses for configuring the reader
-    COMMAND_REG = 0x01              # Command register
-    COMM_INT_EN_REG = 0x02          # Communication interrupt enable
-    DIV_INT_EN_REG = 0x03           # Divider interrupt enable
-    COMM_INT_RQ_REG = 0x04          # Communication interrupt request
-    DIV_INT_RQ_REG = 0x05           # Divider interrupt request
-    ERROR_REG = 0x06                # Error register
-    STATUS_1_REG = 0x07             # Status register 1
-    STATUS_2_REG = 0x08             # Status register 2
-    FIFO_DATA_REG = 0x09            # FIFO data register
-    FIFO_LEVEL_REG = 0x0A           # FIFO level register
-    WATER_LEVEL_REG = 0x0B          # Water level register
-    CONTROL_REG = 0x0C              # Control register
-    BIT_FRAMING_REG = 0x0D          # Bit framing register
-    COLL_REG = 0x0E                 # Collision register
-    MODE_REG = 0x11                 # Mode register
-    TX_CONTROL_REG = 0x14           # Transmitter control register
-    TX_AUTO_REG = 0x15              # Transmitter automatic control
-    CRC_RESULT_REG_MSB = 0x21       # CRC result MSB
-    CRC_RESULT_REG_LSB = 0x22       # CRC result LSB
-    TIMER_MODE_REG = 0x2A           # Timer mode register
-    TIMER_PRESCALER_REG = 0x2B      # Timer prescaler register
-    TIMER_RELOAD_REG_H = 0x2C       # Timer reload register high byte
-    TIMER_RELOAD_REG_L = 0x2D       # Timer reload register low byte
+    COMMAND_REG = 0x01  # Command register
+    COMM_INT_EN_REG = 0x02  # Communication interrupt enable
+    DIV_INT_EN_REG = 0x03  # Divider interrupt enable
+    COMM_INT_RQ_REG = 0x04  # Communication interrupt request
+    DIV_INT_RQ_REG = 0x05  # Divider interrupt request
+    ERROR_REG = 0x06  # Error register
+    STATUS_1_REG = 0x07  # Status register 1
+    STATUS_2_REG = 0x08  # Status register 2
+    FIFO_DATA_REG = 0x09  # FIFO data register
+    FIFO_LEVEL_REG = 0x0A  # FIFO level register
+    WATER_LEVEL_REG = 0x0B  # Water level register
+    CONTROL_REG = 0x0C  # Control register
+    BIT_FRAMING_REG = 0x0D  # Bit framing register
+    COLL_REG = 0x0E  # Collision register
+    MODE_REG = 0x11  # Mode register
+    TX_CONTROL_REG = 0x14  # Transmitter control register
+    TX_AUTO_REG = 0x15  # Transmitter automatic control
+    CRC_RESULT_REG_MSB = 0x21  # CRC result MSB
+    CRC_RESULT_REG_LSB = 0x22  # CRC result LSB
+    TIMER_MODE_REG = 0x2A  # Timer mode register
+    TIMER_PRESCALER_REG = 0x2B  # Timer prescaler register
+    TIMER_RELOAD_REG_H = 0x2C  # Timer reload register high byte
+    TIMER_RELOAD_REG_L = 0x2D  # Timer reload register low byte
     TIMER_COUNTER_VALUE_REG_H = 0x2E  # Timer counter value high byte
     TIMER_COUNTER_VALUE_REG_L = 0x2F  # Timer counter value low byte
 
@@ -79,7 +79,7 @@ class MFRC522:
         """
         # Initialize SPI
         self.spi = spi
-        
+
         # Initialize pins (accept Pin object or pin number)
         self.cs = cs_pin if isinstance(cs_pin, Pin) else Pin(cs_pin, Pin.OUT)
         self.rst = rst_pin if isinstance(rst_pin, Pin) else Pin(rst_pin, Pin.OUT)
@@ -353,9 +353,7 @@ class MFRC522:
         buf.append(pout[0])
         buf.append(pout[1])
 
-        (status, back_data, back_bits) = self._card_write(
-            self.PCD_TRANSCEIVE, buf
-        )
+        (status, back_data, back_bits) = self._card_write(self.PCD_TRANSCEIVE, buf)
 
         if (status == self.OK) and (back_bits == 0x18):
             return back_data[0]
@@ -385,9 +383,7 @@ class MFRC522:
         for i in range(4):
             buf.append(serial_num[i])
 
-        (status, back_data, back_bits) = self._card_write(
-            self.PCD_AUTHENT, buf
-        )
+        (status, back_data, back_bits) = self._card_write(self.PCD_AUTHENT, buf)
 
         if status != self.OK:
             print("Authentication error")
@@ -449,12 +445,11 @@ class MFRC522:
         buf.append(crc[0])
         buf.append(crc[1])
 
-        (status, back_data, back_bits) = self._card_write(
-            self.PCD_TRANSCEIVE, buf
-        )
+        (status, back_data, back_bits) = self._card_write(self.PCD_TRANSCEIVE, buf)
 
-        if not ((status == self.OK) and (back_bits == 4) and
-                ((back_data[0] & 0x0F) == 0x0A)):
+        if not (
+            (status == self.OK) and (back_bits == 4) and ((back_data[0] & 0x0F) == 0x0A)
+        ):
             status = self.ERROR
 
         if status == self.OK:
@@ -465,12 +460,13 @@ class MFRC522:
             buf.append(crc[0])
             buf.append(crc[1])
 
-            (status, back_data, back_bits) = self._card_write(
-                self.PCD_TRANSCEIVE, buf
-            )
+            (status, back_data, back_bits) = self._card_write(self.PCD_TRANSCEIVE, buf)
 
-            if not ((status == self.OK) and (back_bits == 4) and
-                    ((back_data[0] & 0x0F) == 0x0A)):
+            if not (
+                (status == self.OK)
+                and (back_bits == 4)
+                and ((back_data[0] & 0x0F) == 0x0A)
+            ):
                 print("Error writing data")
 
         return status

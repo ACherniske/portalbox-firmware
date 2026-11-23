@@ -10,6 +10,7 @@ from hardware.relay import Relay
 from hardware.button import Button
 from hardware.rfid import RFIDReader
 
+
 class Device:
     """
     Central hardware manager
@@ -47,12 +48,12 @@ class Device:
         try:
             self.spi = SPI(
                 pins.SPI_ID,
-                baudrate = pins.SPI_BAUDRATE,
-                polarity = 0,
-                phase = 0,
-                sck = Pin(pins.SPI_SCK),
-                mosi = Pin(pins.SPI_MOSI),
-                miso = Pin(pins.SPI_MISO)
+                baudrate=pins.SPI_BAUDRATE,
+                polarity=0,
+                phase=0,
+                sck=Pin(pins.SPI_SCK),
+                mosi=Pin(pins.SPI_MOSI),
+                miso=Pin(pins.SPI_MISO),
             )
             print("[Device] SPI bus 1 initialized")
 
@@ -64,12 +65,12 @@ class Device:
         try:
             self.spi_led = SPI(
                 pins.SPI_LED_ID,
-                baudrate = pins.SPI_LED_BAUDRATE,
-                polarity = 0,
-                phase = 0,
-                sck = Pin(pins.SPI_LED_SCK),
-                mosi = Pin(pins.SPI_LED_MOSI),
-                miso = Pin(pins.SPI_LED_MISO)
+                baudrate=pins.SPI_LED_BAUDRATE,
+                polarity=0,
+                phase=0,
+                sck=Pin(pins.SPI_LED_SCK),
+                mosi=Pin(pins.SPI_LED_MOSI),
+                miso=Pin(pins.SPI_LED_MISO),
             )
             print("[Device] SPI bus 2 initialized")
 
@@ -126,10 +127,7 @@ class Device:
     def _init_relay(self):
         """Initialize relay controller."""
         try:
-            self.relay = Relay(
-                pins.RELAY_AC_PIN,
-                pins.RELAY_USB_PIN
-            )
+            self.relay = Relay(pins.RELAY_AC_PIN, pins.RELAY_USB_PIN)
             print("[Device] Relay controller initialized")
 
         except Exception as e:
@@ -144,10 +142,10 @@ class Device:
                 return
 
             self.rfid = RFIDReader(
-                spi = self.spi,
-                cs_pin = pins.RFID_CS,
-                rst_pin = pins.RFID_RST,
-                debounce_ms = settings.RFID_DEBOUNCE_MS
+                spi=self.spi,
+                cs_pin=pins.RFID_CS,
+                rst_pin=pins.RFID_RST,
+                debounce_ms=settings.RFID_DEBOUNCE_MS,
             )
 
             if self.rfid.is_initialized:
@@ -164,28 +162,28 @@ class Device:
         """Initialize LED controller."""
         try:
             if self.spi_led is None:
-                print("[Device] ERROR: Cannot initialize LED controller without SPI bus")
+                print(
+                    "[Device] ERROR: Cannot initialize LED controller without SPI bus"
+                )
                 return
 
             # import appropriate LED driver based on settings
             if settings.LED_TYPE == "dotstar":
-
                 from hardware.lib.dotstar import DotStar
 
                 driver = DotStar(
-                    spi = self.spi_led,
-                    num_leds = settings.LED_COUNT,
-                    brightness = settings.LED_BRIGHTNESS
+                    spi=self.spi_led,
+                    num_leds=settings.LED_COUNT,
+                    brightness=settings.LED_BRIGHTNESS,
                 )
 
             elif settings.LED_TYPE == "neopixel":
-
                 from hardware.lib.neopixel_wrapper import neopixel_wrapper
 
                 driver = neopixel_wrapper(
-                    pin = pins.SPI_LED_MOSI, # NeoPixel uses MOSI pin for data
-                    num_pixels = settings.LED_COUNT,
-                    brightness = settings.LED_BRIGHTNESS
+                    pin=pins.SPI_LED_MOSI,  # NeoPixel uses MOSI pin for data
+                    num_pixels=settings.LED_COUNT,
+                    brightness=settings.LED_BRIGHTNESS,
                 )
 
             else:
@@ -221,11 +219,7 @@ class Device:
         if self.led:
             self.led.stop()
 
-            self.led.wipe(
-                'BLUE',
-                wait_ms = 30,
-                clear_after = True
-            )
+            self.led.wipe("BLUE", wait_ms=30, clear_after=True)
 
         print("[Device] Startup sequence complete")
 
@@ -241,7 +235,7 @@ class Device:
         if self.led:
             self.led.stop()
 
-            self.led.fill('RED')
+            self.led.fill("RED")
 
         # Shutdown beep
         if self.buzzer:
@@ -331,95 +325,45 @@ class Device:
             self.led.stop()
 
     def led_pulse(
-        self,
-        color,
-        min_brightness = 0.05,
-        max_brightness = 0.4,
-        step = 0.02,
-        interval_ms = 50
+        self, color, min_brightness=0.05, max_brightness=0.4, step=0.02, interval_ms=50
     ):
         """Start a pulsing animation on the LEDs."""
         if self.led:
             self.led.pulse(
                 color,
-                min_brightness = min_brightness,
-                max_brightness = max_brightness,
-                step = step,
-                interval_ms = interval_ms
+                min_brightness=min_brightness,
+                max_brightness=max_brightness,
+                step=step,
+                interval_ms=interval_ms,
             )
 
-    def led_blink(
-        self,
-        color,
-        count = None,
-        on_ms = 250,
-        off_ms = 250
-    ):
+    def led_blink(self, color, count=None, on_ms=250, off_ms=250):
         """Start a blinking animation on the LEDs."""
         if self.led:
-            self.led.blink(
-                color,
-                count = count,
-                on_ms = on_ms,
-                off_ms = off_ms
-            )
+            self.led.blink(color, count=count, on_ms=on_ms, off_ms=off_ms)
 
-    def led_chase(
-        self,
-        color,
-        background = 'OFF',
-        wait_ms = 50,
-        continuous = True
-    ):
+    def led_chase(self, color, background="OFF", wait_ms=50, continuous=True):
         """Start a chasing animation on the LEDs."""
         if self.led:
             self.led.chase(
-                color,
-                background = background,
-                wait_ms = wait_ms,
-                continuous = continuous
+                color, background=background, wait_ms=wait_ms, continuous=continuous
             )
 
-    def led_wipe(
-        self,
-        color,
-        wait_ms = 50,
-        clear_after = False
-    ):
+    def led_wipe(self, color, wait_ms=50, clear_after=False):
         """Start a wiping animation on the LEDs."""
         if self.led:
-            self.led.wipe(
-                color,
-                wait_ms = wait_ms,
-                clear_after = clear_after
-            )
+            self.led.wipe(color, wait_ms=wait_ms, clear_after=clear_after)
 
-    def led_rainbow(
-        self,
-        wait_ms = 50,
-        continuous = True
-    ):
+    def led_rainbow(self, wait_ms=50, continuous=True):
         """Start a rainbow animation on the LEDs."""
         if self.led:
-            self.led.rainbow(
-                wait_ms = wait_ms,
-                continuous = continuous
-            )
+            self.led.rainbow(wait_ms=wait_ms, continuous=continuous)
 
-    def buzzer_play(
-        self,
-        pattern,
-        repeat = 1,
-        continuous = False,
-        interval_ms = 1000
-    ):
+    def buzzer_play(self, pattern, repeat=1, continuous=False, interval_ms=1000):
         """Play a buzzer pattern."""
         if self.buzzer:
             self.buzzer.play(
-                pattern,
-                repeat = repeat,
-                continuous = continuous,
-                interval_ms = interval_ms
+                pattern, repeat=repeat, continuous=continuous, interval_ms=interval_ms
             )
 
     def buzzer_stop(self):
@@ -442,20 +386,16 @@ class Device:
         if self.buzzer:
             self.buzzer.play(Buzzer.BEEP_TRIPLE)
 
-    def buzzer_card_repeat(self, interval_ms = 1000):
+    def buzzer_card_repeat(self, interval_ms=1000):
         if self.buzzer:
             self.buzzer.play(
-                Buzzer.BEEP_CARD_READ,
-                continuous = True,
-                interval_ms = interval_ms
+                Buzzer.BEEP_CARD_READ, continuous=True, interval_ms=interval_ms
             )
 
-    def buzzer_timeout_repeat(self, interval_ms = 1000):
+    def buzzer_timeout_repeat(self, interval_ms=1000):
         if self.buzzer:
             self.buzzer.play(
-                Buzzer.BEEP_TIMEOUT,
-                continuous = True,
-                interval_ms = interval_ms
+                Buzzer.BEEP_TIMEOUT, continuous=True, interval_ms=interval_ms
             )
 
     @property
@@ -492,17 +432,17 @@ class Device:
     def get_status(self):
         """
         Get status of all hardware components.
-        
+
         Returns:
             dict: Status of each component
         """
         return {
-            'buzzer': self.buzzer is not None,
-            'relay': self.relay is not None,
-            'rfid': self.rfid is not None and self.rfid.is_initialized,
-            'led': self.led is not None,
-            'button': self.button is not None,
-            'relay_state': self.relay.state if self.relay else None,
+            "buzzer": self.buzzer is not None,
+            "relay": self.relay is not None,
+            "rfid": self.rfid is not None and self.rfid.is_initialized,
+            "led": self.led is not None,
+            "button": self.button is not None,
+            "relay_state": self.relay.state if self.relay else None,
         }
 
     def print_status(self):
@@ -512,9 +452,7 @@ class Device:
         status = self.get_status()
 
         for component, active in status.items():
-
-            if component == 'relay_state':
-
+            if component == "relay_state":
                 if active is not None:
                     print(f"  Relay: {'ON' if active else 'OFF'}")
 
@@ -524,8 +462,10 @@ class Device:
 
         print("=====================\n")
 
+
 # Singleton instance of Device
 _device = None
+
 
 def get_device():
     """Get the singleton Device instance, initializing if necessary."""
@@ -535,6 +475,7 @@ def get_device():
         _device = Device()
 
     return _device
+
 
 def cleanup_device():
     """Cleanup the singleton Device instance."""

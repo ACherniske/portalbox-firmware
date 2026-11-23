@@ -5,16 +5,16 @@ import uasyncio as asyncio
 
 # Color constants (RGB format)
 COLORS = {
-    'OFF': (0, 0, 0),
-    'RED': (255, 0, 0),
-    'GREEN': (0, 255, 0),
-    'BLUE': (0, 0, 255),
-    'WHITE': (255, 255, 255),
-    'ORANGE': (255, 115, 0),
-    'YELLOW': (255, 255, 0),
-    'PURPLE': (128, 0, 128),
-    'CYAN': (0, 255, 255),
-    'MAGENTA': (255, 0, 255),
+    "OFF": (0, 0, 0),
+    "RED": (255, 0, 0),
+    "GREEN": (0, 255, 0),
+    "BLUE": (0, 0, 255),
+    "WHITE": (255, 255, 255),
+    "ORANGE": (255, 115, 0),
+    "YELLOW": (255, 255, 0),
+    "PURPLE": (128, 0, 128),
+    "CYAN": (0, 255, 255),
+    "MAGENTA": (255, 0, 255),
 }
 
 
@@ -41,9 +41,9 @@ class LEDController:
         print(f"[LED] Initialized with driver: {type(driver).__name__}")
 
         # Handle different attribute names
-        if hasattr(driver, 'num_leds'):
+        if hasattr(driver, "num_leds"):
             self.num_leds = driver.num_leds
-        elif hasattr(driver, 'num_pixels'):
+        elif hasattr(driver, "num_pixels"):
             self.num_leds = driver.num_pixels
         else:
             self.num_leds = 10  # Default fallback
@@ -55,12 +55,12 @@ class LEDController:
         # Brightness the driver started with. A pulse changes the driver's
         # brightness; stop() puts this back so what comes next (the grace
         # warning, an error color) is not left dim.
-        self._base_brightness = getattr(driver, 'brightness', None)
+        self._base_brightness = getattr(driver, "brightness", None)
 
     @property
     def brightness(self):
         """Get current brightness."""
-        return getattr(self.driver, 'brightness', 1.0)
+        return getattr(self.driver, "brightness", 1.0)
 
     @brightness.setter
     def brightness(self, value):
@@ -90,7 +90,7 @@ class LEDController:
         if color is None:
             return (0, 0, 0)
         if isinstance(color, str):
-            return COLORS.get(color.upper(), COLORS['OFF'])
+            return COLORS.get(color.upper(), COLORS["OFF"])
         return color
 
     def _fill_driver(self, color):
@@ -130,7 +130,7 @@ class LEDController:
 
     def clear(self):
         """Turn off all LEDs."""
-        self.fill(COLORS['OFF'])
+        self.fill(COLORS["OFF"])
 
     def set_pixel(self, index, color):
         """
@@ -196,8 +196,9 @@ class LEDController:
             self._blink_task(color, count, on_ms, off_ms)
         )
 
-    async def _pulse_task(self, color, min_brightness, max_brightness,
-                          step, interval_ms):
+    async def _pulse_task(
+        self, color, min_brightness, max_brightness, step, interval_ms
+    ):
         """
         Internal pulse task.
 
@@ -238,8 +239,9 @@ class LEDController:
         finally:
             self._animation_running = False
 
-    def pulse(self, color, min_brightness=0.1, max_brightness=1.0,
-              step=0.05, interval_ms=50):
+    def pulse(
+        self, color, min_brightness=0.1, max_brightness=1.0, step=0.05, interval_ms=50
+    ):
         """
         Start pulsing animation (non-blocking).
 
@@ -253,8 +255,7 @@ class LEDController:
         self.stop()
         color = self._normalize_color(color)
         self._current_task = asyncio.create_task(
-            self._pulse_task(color, min_brightness, max_brightness,
-                             step, interval_ms)
+            self._pulse_task(color, min_brightness, max_brightness, step, interval_ms)
         )
 
     async def _rainbow_task(self, wait_ms, continuous):
@@ -345,7 +346,7 @@ class LEDController:
         finally:
             self._animation_running = False
 
-    def chase(self, color, background='OFF', wait_ms=50, continuous=True):
+    def chase(self, color, background="OFF", wait_ms=50, continuous=True):
         """
         Start chase effect (non-blocking).
 

@@ -9,21 +9,10 @@ import time
 NUM_LEDS = 10
 
 # Initialize SPI
-spi = SPI(
-    1,
-    baudrate=4000000,
-    polarity=0,
-    phase=0,
-    sck=Pin(13),
-    mosi=Pin(14)
-)
+spi = SPI(1, baudrate=4000000, polarity=0, phase=0, sck=Pin(13), mosi=Pin(14))
 
 # Create DotStar strip
-dots = DotStar(
-    spi,
-    num_leds=NUM_LEDS,
-    brightness=31
-)
+dots = DotStar(spi, num_leds=NUM_LEDS, brightness=31)
 
 # Start with all LEDs off
 dots.clear()

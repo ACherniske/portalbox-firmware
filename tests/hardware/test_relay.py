@@ -22,10 +22,7 @@ USB_RELAY_PIN = 9
 # Relay Setup
 # =========================================================
 
-relay = Relay(
-    ac_relay_pin=AC_RELAY_PIN,
-    usb_relay_pin=USB_RELAY_PIN
-)
+relay = Relay(ac_relay_pin=AC_RELAY_PIN, usb_relay_pin=USB_RELAY_PIN)
 
 print("Relay test starting...")
 

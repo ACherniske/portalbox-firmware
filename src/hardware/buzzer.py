@@ -29,13 +29,7 @@ class Buzzer:
         await asyncio.sleep_ms(duration_ms)
         self.pin.off()
 
-    async def _play_task(
-        self,
-        pattern,
-        repeat=1,
-        continuous=False,
-        interval_ms=1000
-    ):
+    async def _play_task(self, pattern, repeat=1, continuous=False, interval_ms=1000):
         try:
             iterations = None if continuous else repeat
             count = 0
@@ -53,22 +47,11 @@ class Buzzer:
         except asyncio.CancelledError:
             self.pin.off()
 
-    def play(
-        self,
-        pattern,
-        repeat=1,
-        continuous=False,
-        interval_ms=1000
-    ):
+    def play(self, pattern, repeat=1, continuous=False, interval_ms=1000):
         self.stop()
 
         self._current_task = asyncio.create_task(
-            self._play_task(
-                pattern,
-                repeat,
-                continuous,
-                interval_ms
-            )
+            self._play_task(pattern, repeat, continuous, interval_ms)
         )
 
     def stop(self):

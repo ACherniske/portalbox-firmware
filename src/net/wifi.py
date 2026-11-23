@@ -14,6 +14,7 @@ def idf_ram():
     rows = esp32.idf_heap_info(esp32.HEAP_DATA)
     return sum(r[1] for r in rows), max(r[2] for r in rows)
 
+
 # nic.connect() hands ESP-IDF a pointer into each cert/key str without a copy.
 # ESP-IDF reads it again on every EAP handshake (including auto-reconnects),
 # so the strings must stay alive at module level, not in a local.
@@ -51,7 +52,7 @@ def _strongest_bssid(networks, ssid):
 
 
 def _mac(bssid):
-    return ':'.join('%02x' % b for b in bssid)
+    return ":".join("%02x" % b for b in bssid)
 
 
 def _sleep_fed(seconds):
@@ -59,6 +60,7 @@ def _sleep_fed(seconds):
     for _ in range(int(seconds)):
         recovery.feed()
         time.sleep(1)
+
 
 # wlan.status() codes that mean the attempt has failed, and what to tell the user.
 _FAILURE_MESSAGES = {
@@ -73,17 +75,17 @@ _FAILURE_MESSAGES = {
 }
 
 _STATUS_NAMES = {
-    NetworkStatus.IDLE: 'IDLE',
-    NetworkStatus.CONNECTING: 'CONNECTING',
-    NetworkStatus.GOT_IP: 'GOT_IP',
-    NetworkStatus.BEACON_TIMEOUT: 'BEACON_TIMEOUT',
-    NetworkStatus.NO_AP_FOUND: 'NO_AP_FOUND',
-    NetworkStatus.WRONG_PASSWORD: 'WRONG_PASSWORD',
-    NetworkStatus.CONNECT_FAIL: 'CONNECT_FAIL',   # same code as ASSOC_FAIL
-    NetworkStatus.HANDSHAKE_TIMEOUT: 'HANDSHAKE_TIMEOUT',
-    NetworkStatus.NO_AP_FOUND_W_COMPATIBLE_SECURITY: 'NO_AP_FOUND_W_COMPATIBLE_SECURITY',
-    NetworkStatus.NO_AP_FOUND_IN_AUTHMODE_THRESHOLD: 'NO_AP_FOUND_IN_AUTHMODE_THRESHOLD',
-    NetworkStatus.NO_AP_FOUND_IN_RSSI_THRESHOLD: 'NO_AP_FOUND_IN_RSSI_THRESHOLD',
+    NetworkStatus.IDLE: "IDLE",
+    NetworkStatus.CONNECTING: "CONNECTING",
+    NetworkStatus.GOT_IP: "GOT_IP",
+    NetworkStatus.BEACON_TIMEOUT: "BEACON_TIMEOUT",
+    NetworkStatus.NO_AP_FOUND: "NO_AP_FOUND",
+    NetworkStatus.WRONG_PASSWORD: "WRONG_PASSWORD",
+    NetworkStatus.CONNECT_FAIL: "CONNECT_FAIL",  # same code as ASSOC_FAIL
+    NetworkStatus.HANDSHAKE_TIMEOUT: "HANDSHAKE_TIMEOUT",
+    NetworkStatus.NO_AP_FOUND_W_COMPATIBLE_SECURITY: "NO_AP_FOUND_W_COMPATIBLE_SECURITY",
+    NetworkStatus.NO_AP_FOUND_IN_AUTHMODE_THRESHOLD: "NO_AP_FOUND_IN_AUTHMODE_THRESHOLD",
+    NetworkStatus.NO_AP_FOUND_IN_RSSI_THRESHOLD: "NO_AP_FOUND_IN_RSSI_THRESHOLD",
 }
 
 
@@ -150,11 +152,13 @@ class WifiManager:
 
     def _load_ca_cert(self):
         try:
-            with open(self.config.ca_cert_file, 'r') as f:
+            with open(self.config.ca_cert_file, "r") as f:
                 cert_content = f.read()
 
             cert_count = cert_content.count("-----BEGIN CERTIFICATE-----")
-            self._log(f"[WiFi] Loaded {cert_count} certificate(s) from {self.config.ca_cert_file}")
+            self._log(
+                f"[WiFi] Loaded {cert_count} certificate(s) from {self.config.ca_cert_file}"
+            )
             return cert_content
         except Exception as e:
             self._log(f"[WiFi] Error loading certificate: {e}")
@@ -186,13 +190,13 @@ class WifiManager:
 
         try:
             connect_params = {
-                'eap_method': network.WLAN.EAP_PWD,
-                'username': self.config.username,
-                'password': password,
+                "eap_method": network.WLAN.EAP_PWD,
+                "username": self.config.username,
+                "password": password,
             }
 
             if self._bssid:
-                connect_params['bssid'] = self._bssid
+                connect_params["bssid"] = self._bssid
 
             self.nic.connect(self.config.ssid, **connect_params)
             self._log("[WiFi] Connection initiated")
@@ -220,15 +224,15 @@ class WifiManager:
 
         try:
             connect_params = {
-                'eap_method': network.WLAN.EAP_PEAP,
-                'username': self.config.username,
-                'password': password,
-                'identity': self.config.identity,
-                'ca_cert': cert_content,
+                "eap_method": network.WLAN.EAP_PEAP,
+                "username": self.config.username,
+                "password": password,
+                "identity": self.config.identity,
+                "ca_cert": cert_content,
             }
 
             if self._bssid:
-                connect_params['bssid'] = self._bssid
+                connect_params["bssid"] = self._bssid
 
             _hold(cert_content)
             self.nic.connect(self.config.ssid, **connect_params)
@@ -259,16 +263,16 @@ class WifiManager:
 
         try:
             connect_params = {
-                'eap_method': network.WLAN.EAP_TTLS,
-                'username': self.config.username,
-                'password': password,
-                'identity': self.config.identity,
-                'ca_cert': cert_content,
-                'ttls_phase2_method': self.config.ttls_phase2_method,
+                "eap_method": network.WLAN.EAP_TTLS,
+                "username": self.config.username,
+                "password": password,
+                "identity": self.config.identity,
+                "ca_cert": cert_content,
+                "ttls_phase2_method": self.config.ttls_phase2_method,
             }
 
             if self._bssid:
-                connect_params['bssid'] = self._bssid
+                connect_params["bssid"] = self._bssid
 
             _hold(cert_content)
             self.nic.connect(self.config.ssid, **connect_params)
@@ -286,22 +290,24 @@ class WifiManager:
         self._log("[WiFi] WARNING: EAP-TLS is EXPERIMENTAL and UNTESTED")
 
         if self.config.private_key_password_hash and private_key_password:
-            if not self.config.verify_password(private_key_password, 'private_key'):
+            if not self.config.verify_password(private_key_password, "private_key"):
                 self._log("[WiFi] ERROR: Private key password verification failed")
                 self.last_error = "Invalid private key password"
                 return False
 
         try:
-            with open(self.config.client_cert_file, 'r') as f:
+            with open(self.config.client_cert_file, "r") as f:
                 client_cert = f.read()
-            self._log(f"[WiFi] Loaded client certificate: {self.config.client_cert_file}")
+            self._log(
+                f"[WiFi] Loaded client certificate: {self.config.client_cert_file}"
+            )
         except Exception as e:
             self._log(f"[WiFi] Error loading client certificate: {e}")
             self.last_error = f"Certificate load failed: {e}"
             return False
 
         try:
-            with open(self.config.private_key_file, 'r') as f:
+            with open(self.config.private_key_file, "r") as f:
                 private_key = f.read()
             self._log(f"[WiFi] Loaded private key: {self.config.private_key_file}")
         except Exception as e:
@@ -313,17 +319,17 @@ class WifiManager:
 
         try:
             connect_params = {
-                'eap_method': network.WLAN.EAP_TLS,
-                'client_cert': client_cert,
-                'private_key': private_key,
-                'disable_time_check': self.config.disable_time_check,
+                "eap_method": network.WLAN.EAP_TLS,
+                "client_cert": client_cert,
+                "private_key": private_key,
+                "disable_time_check": self.config.disable_time_check,
             }
 
             if private_key_password:
-                connect_params['private_key_password'] = private_key_password
+                connect_params["private_key_password"] = private_key_password
 
             if self._bssid:
-                connect_params['bssid'] = self._bssid
+                connect_params["bssid"] = self._bssid
 
             _hold(client_cert, private_key, private_key_password)
             self.nic.connect(self.config.ssid, **connect_params)
@@ -344,8 +350,10 @@ class WifiManager:
             return False
 
         if self.config.wpa3:
-            self._log("[WiFi] WARNING: wpa3 is set but not enforced; "
-                      "the access point picks WPA2 or WPA3")
+            self._log(
+                "[WiFi] WARNING: wpa3 is set but not enforced; "
+                "the access point picks WPA2 or WPA3"
+            )
         self._log(f"[WiFi] Connecting to {self.config.ssid} (WPA2-PSK)...")
 
         try:
@@ -355,7 +363,7 @@ class WifiManager:
             connect_params = {}
 
             if self._bssid:
-                connect_params['bssid'] = self._bssid
+                connect_params["bssid"] = self._bssid
 
             self.nic.connect(self.config.ssid, password, **connect_params)
             self._log("[WiFi] Connection initiated")
@@ -381,7 +389,9 @@ class WifiManager:
             status = self.nic.status()
 
             if status != last_status:
-                self._log(f"[WiFi] [{elapsed:.1f}s] Status: {self._get_status_name(status)}")
+                self._log(
+                    f"[WiFi] [{elapsed:.1f}s] Status: {self._get_status_name(status)}"
+                )
                 last_status = status
                 fail_count = 0
 
@@ -393,7 +403,11 @@ class WifiManager:
             message = _FAILURE_MESSAGES.get(status)
             if message and (seen_connecting or status != self._pre_status):
                 fail_count += 1
-                limit = AUTH_FAIL_POLLS if status == NetworkStatus.WRONG_PASSWORD else FAIL_POLLS
+                limit = (
+                    AUTH_FAIL_POLLS
+                    if status == NetworkStatus.WRONG_PASSWORD
+                    else FAIL_POLLS
+                )
                 if fail_count >= limit:
                     self.last_error = message
                     self.status = status
@@ -408,7 +422,8 @@ class WifiManager:
                 elif self.config.network_type == NetworkType.WPA2_ENTERPRISE:
                     self.last_error = (
                         f"Timed out during login (EAP) after {self.config.timeout}s: "
-                        "check the board clock, CA certificate, and credentials")
+                        "check the board clock, CA certificate, and credentials"
+                    )
                 else:
                     self.last_error = f"Timeout after {self.config.timeout}s"
                 if not message:
@@ -469,10 +484,10 @@ class WifiManager:
         # Free RAM before each login: too little makes the login stall
         # silently, so the log shows it when a box can't connect. The event
         # log gets it once per boot (retries would push older lines out).
-        ram = 'connect, ram %d/%d' % idf_ram()
-        self._log('[WiFi] ' + ram)
+        ram = "connect, ram %d/%d" % idf_ram()
+        self._log("[WiFi] " + ram)
         if not self._ram_logged:
-            recovery.log('wifi', ram)
+            recovery.log("wifi", ram)
             self._ram_logged = True
 
         self._bssid = self._pick_bssid()
@@ -508,7 +523,9 @@ class WifiManager:
             recovery.feed()
         bssid = _strongest_bssid(networks, self.config.ssid)
         if bssid is None:
-            self._log(f"[WiFi] {self.config.ssid} not in scan; letting the driver pick the AP")
+            self._log(
+                f"[WiFi] {self.config.ssid} not in scan; letting the driver pick the AP"
+            )
         else:
             self._log(f"[WiFi] Strongest AP: {_mac(bssid)}")
         return bssid
@@ -516,7 +533,7 @@ class WifiManager:
     def connect_with_retry(self, password, private_key_password=None):
         for attempt in range(self.config.retry_attempts):
             self._log(f"[WiFi] Attempt {attempt + 1}/{self.config.retry_attempts}")
-            
+
             if not self._init_interface():
                 self.last_error = "Interface reset failed"
 
@@ -537,7 +554,7 @@ class WifiManager:
             try:
                 self.nic.disconnect()
             except Exception:
-                pass   # raises when the driver is already stopped
+                pass  # raises when the driver is already stopped
         _release()
 
     def disconnect(self):
@@ -562,40 +579,40 @@ class WifiManager:
     def get_status(self):
         if not self.nic:
             return {
-                'connected': False,
-                'error': 'Interface not initialized',
+                "connected": False,
+                "error": "Interface not initialized",
             }
 
         status = {
-            'connected': self.is_connected(),
-            'ssid': self.config.ssid,
-            'status': self._get_status_name(self.status),
+            "connected": self.is_connected(),
+            "ssid": self.config.ssid,
+            "status": self._get_status_name(self.status),
         }
 
         if self.config.network_type == NetworkType.WPA2_ENTERPRISE:
-            status['network_type'] = f'WPA2-Enterprise ({self.config.eap_method})'
+            status["network_type"] = f"WPA2-Enterprise ({self.config.eap_method})"
         elif self.config.network_type == NetworkType.WPA3_PSK:
-            status['network_type'] = 'WPA3-PSK'
+            status["network_type"] = "WPA3-PSK"
         elif self.config.network_type == NetworkType.WPA2_PSK:
-            status['network_type'] = 'WPA2-PSK'
+            status["network_type"] = "WPA2-PSK"
 
         if self.connected:
             ifconfig = self.nic.ifconfig()
-            status['ip'] = ifconfig[0]
-            status['subnet'] = ifconfig[1]
-            status['gateway'] = ifconfig[2]
-            status['dns'] = ifconfig[3]
+            status["ip"] = ifconfig[0]
+            status["subnet"] = ifconfig[1]
+            status["gateway"] = ifconfig[2]
+            status["dns"] = ifconfig[3]
 
             if self.connection_time:
-                status['uptime'] = time.time() - self.connection_time
+                status["uptime"] = time.time() - self.connection_time
 
         if self.last_error:
-            status['last_error'] = self.last_error
+            status["last_error"] = self.last_error
 
         return status
 
     def _get_status_name(self, status_code):
-        return _STATUS_NAMES.get(status_code, f'UNKNOWN({status_code})')
+        return _STATUS_NAMES.get(status_code, f"UNKNOWN({status_code})")
 
     def scan(self):
         if not self.nic:

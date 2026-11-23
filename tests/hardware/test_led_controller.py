@@ -23,28 +23,13 @@ from hardware.led import LEDController
 # =========================================================
 
 # Onboard NeoPixel
-onboard_np = neopixel_wrapper(
-    pin=38,
-    num_pixels=1,
-    brightness=31
-)
+onboard_np = neopixel_wrapper(pin=38, num_pixels=1, brightness=31)
 
 # DotStar SPI
-spi = SPI(
-    1,
-    baudrate=4000000,
-    polarity=0,
-    phase=0,
-    sck=Pin(13),
-    mosi=Pin(14)
-)
+spi = SPI(1, baudrate=4000000, polarity=0, phase=0, sck=Pin(13), mosi=Pin(14))
 
 # External DotStar strip
-dotstars = DotStar(
-    spi,
-    num_leds=10,
-    brightness=31
-)
+dotstars = DotStar(spi, num_leds=10, brightness=31)
 
 # LED Controllers
 onboard = LEDController(onboard_np)
@@ -54,6 +39,7 @@ strip = LEDController(dotstars)
 # =========================================================
 # Demo Task
 # =========================================================
+
 
 async def led_demo():
     print("Starting LED test...")
@@ -100,11 +86,7 @@ async def led_demo():
     strip.chase("PURPLE", background="OFF", wait_ms=75)
 
     onboard.pulse(
-        "MAGENTA",
-        min_brightness=2,
-        max_brightness=31,
-        step=1,
-        interval_ms=30
+        "MAGENTA", min_brightness=2, max_brightness=31, step=1, interval_ms=30
     )
 
     await asyncio.sleep(5)
@@ -139,6 +121,7 @@ async def led_demo():
 # =========================================================
 # Main Loop
 # =========================================================
+
 
 async def main():
     await led_demo()

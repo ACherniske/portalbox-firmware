@@ -38,16 +38,7 @@ async def main():
 
         device.led.stop()
 
-        colors = [
-            'RED',
-            'GREEN',
-            'BLUE',
-            'WHITE',
-            'PURPLE',
-            'CYAN',
-            'YELLOW',
-            'OFF'
-        ]
+        colors = ["RED", "GREEN", "BLUE", "WHITE", "PURPLE", "CYAN", "YELLOW", "OFF"]
 
         for color in colors:
             print(f"[TEST] LED color: {color}")
@@ -55,10 +46,7 @@ async def main():
             await asyncio.sleep(1)
 
         print("[TEST] Running LED chase animation...")
-        device.led.chase(
-            'BLUE',
-            wait_ms=50
-        )
+        device.led.chase("BLUE", wait_ms=50)
 
         await asyncio.sleep(3)
 
@@ -91,17 +79,14 @@ async def main():
         start = time.ticks_ms()
 
         while time.ticks_diff(time.ticks_ms(), start) < 10000:
-
             if device.button.is_pressed:
                 print("[TEST] Button pressed!")
 
                 if device.led:
-                    device.led.fill('GREEN')
+                    device.led.fill("GREEN")
 
                 if device.buzzer:
-                    device.buzzer.play(
-                        device.buzzer.BEEP_CARD_READ
-                    )
+                    device.buzzer.play(device.buzzer.BEEP_CARD_READ)
 
                 await asyncio.sleep(1)
 
@@ -123,7 +108,6 @@ async def main():
         start = time.ticks_ms()
 
         while time.ticks_diff(time.ticks_ms(), start) < 15000:
-
             uid = device.rfid.read_card()
 
             if uid:
@@ -131,12 +115,10 @@ async def main():
                 print(f"[TEST] UID: {uid}")
 
                 if device.led:
-                    device.led.fill('CYAN')
+                    device.led.fill("CYAN")
 
                 if device.buzzer:
-                    device.buzzer.play(
-                        device.buzzer.BEEP_TRIPLE
-                    )
+                    device.buzzer.play(device.buzzer.BEEP_TRIPLE)
 
                 await asyncio.sleep(1)
 
@@ -154,9 +136,7 @@ async def main():
     if device.buzzer:
         print("[TEST] Testing buzzer...")
 
-        device.buzzer.play(
-            device.buzzer.BEEP_TRIPLE
-        )
+        device.buzzer.play(device.buzzer.BEEP_TRIPLE)
 
         await asyncio.sleep(2)
 

@@ -4,58 +4,87 @@ PROFILES = {
     # =========================================================
     # FSM states
     # =========================================================
-    'idle': {
-        'led': {'mode': 'pulse', 'color': 'BLUE', 'min_brightness': 0.05, 'max_brightness': 0.30, 'step': 0.02},
-        'buzzer': None,
+    "idle": {
+        "led": {
+            "mode": "pulse",
+            "color": "BLUE",
+            "min_brightness": 0.05,
+            "max_brightness": 0.30,
+            "step": 0.02,
+        },
+        "buzzer": None,
     },
-    'auth': {
-        'led': {'mode': 'pulse', 'color': 'GREEN', 'min_brightness': 0.05, 'max_brightness': 0.40, 'step': 0.02},
-        'buzzer': {'pattern': 'card_read'},
+    "auth": {
+        "led": {
+            "mode": "pulse",
+            "color": "GREEN",
+            "min_brightness": 0.05,
+            "max_brightness": 0.40,
+            "step": 0.02,
+        },
+        "buzzer": {"pattern": "card_read"},
     },
-    'noauth': {
-        'led': {'mode': 'pulse', 'color': 'RED', 'min_brightness': 0.05, 'max_brightness': 0.40, 'step': 0.02},
-        'buzzer': {'pattern': 'timeout'},
+    "noauth": {
+        "led": {
+            "mode": "pulse",
+            "color": "RED",
+            "min_brightness": 0.05,
+            "max_brightness": 0.40,
+            "step": 0.02,
+        },
+        "buzzer": {"pattern": "timeout"},
     },
-    'grace': {
-        'led': {'mode': 'blink', 'color': 'YELLOW', 'on_ms': 500, 'off_ms': 500},
-        'buzzer': {'pattern': 'card_repeat', 'interval_ms': 1000},
+    "grace": {
+        "led": {"mode": "blink", "color": "YELLOW", "on_ms": 500, "off_ms": 500},
+        "buzzer": {"pattern": "card_repeat", "interval_ms": 1000},
     },
-    'proxy': {
-        'led': {'mode': 'pulse', 'color': 'ORANGE', 'min_brightness': 0.05, 'max_brightness': 0.40, 'step': 0.02},
-        'buzzer': {'pattern': 'card_read'},
+    "proxy": {
+        "led": {
+            "mode": "pulse",
+            "color": "ORANGE",
+            "min_brightness": 0.05,
+            "max_brightness": 0.40,
+            "step": 0.02,
+        },
+        "buzzer": {"pattern": "card_read"},
     },
-    'training': {
-        'led': {'mode': 'pulse', 'color': 'PURPLE', 'min_brightness': 0.05, 'max_brightness': 0.40, 'step': 0.02},
-        'buzzer': {'pattern': 'card_read'},
+    "training": {
+        "led": {
+            "mode": "pulse",
+            "color": "PURPLE",
+            "min_brightness": 0.05,
+            "max_brightness": 0.40,
+            "step": 0.02,
+        },
+        "buzzer": {"pattern": "card_read"},
     },
-    'timeout': {
-        'led': {'mode': 'blink', 'color': 'RED', 'on_ms': 250, 'off_ms': 250},
-        'buzzer': {'pattern': 'timeout_repeat', 'interval_ms': 1000},
+    "timeout": {
+        "led": {"mode": "blink", "color": "RED", "on_ms": 250, "off_ms": 250},
+        "buzzer": {"pattern": "timeout_repeat", "interval_ms": 1000},
     },
-
     # =========================================================
     # Boot states — called from core/system.py SYNCHRONOUSLY, before
     # any asyncio event loop is running.
     # =========================================================
-    'booting': {
-        'led': {'mode': 'fill', 'color': (10, 10, 10)},
-        'buzzer': None,
+    "booting": {
+        "led": {"mode": "fill", "color": (10, 10, 10)},
+        "buzzer": None,
     },
-    'wifi_connecting': {
-        'led': {'mode': 'fill', 'color': (0, 25, 25)},
-        'buzzer': None,
+    "wifi_connecting": {
+        "led": {"mode": "fill", "color": (0, 25, 25)},
+        "buzzer": None,
     },
-    'ota_checking': {
-        'led': {'mode': 'fill', 'color': (0, 60, 60)},
-        'buzzer': None,
+    "ota_checking": {
+        "led": {"mode": "fill", "color": (0, 60, 60)},
+        "buzzer": None,
     },
-    'offline': {
+    "offline": {
         # Retained for any future ASYNC use (e.g. the FSM signaling a
         # lost connection mid-operation, where an event loop really
         # is running). At boot, core/system.py does not use it: a WiFi
         # failure resets the box and a bad WiFi config shows the stuck signal.
-        'led': {'mode': 'blink', 'color': 'RED', 'on_ms': 400, 'off_ms': 1200},
-        'buzzer': None,
+        "led": {"mode": "blink", "color": "RED", "on_ms": 400, "off_ms": 1200},
+        "buzzer": None,
     },
 }
 
@@ -72,8 +101,8 @@ def apply_feedback(device, profile_name):
         device.buzzer_stop()
         return
 
-    _apply_hardware_feedback(device, prefix='led', config=profile.get('led'))
-    _apply_hardware_feedback(device, prefix='buzzer', config=profile.get('buzzer'))
+    _apply_hardware_feedback(device, prefix="led", config=profile.get("led"))
+    _apply_hardware_feedback(device, prefix="buzzer", config=profile.get("buzzer"))
 
 
 def _apply_hardware_feedback(device, prefix, config):
@@ -90,11 +119,11 @@ def _apply_hardware_feedback(device, prefix, config):
 
     # Work on a copy to avoid mutating the immutable PROFILES dict
     kwargs = config.copy()
-    action = kwargs.pop('mode' if prefix == 'led' else 'pattern', None)
+    action = kwargs.pop("mode" if prefix == "led" else "pattern", None)
 
     # Handle special alias (e.g., mode='off' -> device.led_clear())
-    if action == 'off':
-        if prefix == 'led':
+    if action == "off":
+        if prefix == "led":
             device.led_clear()
         elif stop_method:
             stop_method()

@@ -1,6 +1,7 @@
 from tests.test_helper import TestRunner
 import net.crypto as crypto
 
+
 def run_all():
     runner = TestRunner()
 
@@ -27,6 +28,7 @@ def run_all():
 
     # Show final LED result
     runner.final_report()
+
 
 if __name__ == "__main__":
     run_all()
