@@ -71,11 +71,11 @@ PROFILES = {
         "buzzer": None,
     },
     "wifi_connecting": {
-        "led": {"mode": "fill", "color": (0, 25, 25)},
+        "led": {"mode": "fill", "color": (10, 10, 10)},
         "buzzer": None,
     },
     "ota_checking": {
-        "led": {"mode": "fill", "color": (0, 60, 60)},
+        "led": {"mode": "fill", "color": (10, 10, 10)},
         "buzzer": None,
     },
     "offline": {

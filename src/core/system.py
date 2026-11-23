@@ -323,14 +323,13 @@ def boot():
     # =========================================================
     # Launch main application
     #
-    # device.startup_sequence() is the single owner of the "ready"
-    # cue (blue wipe + triple beep). core/main.py's
-    # Application.initialize() must NOT also call it.
+    # The LEDs stay boot white while the app starts. The "ready" cue
+    # (device.startup_sequence(): blue wipe + triple beep) belongs to
+    # core/main.py's Application.run(), once the startup report is
+    # done and just before the FSM. Not here.
     # =========================================================
 
     print("\n[SYSTEM] Launching main application...\n")
-
-    device.startup_sequence()
 
     recovery.feed()
 

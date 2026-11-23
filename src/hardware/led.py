@@ -1,5 +1,7 @@
 """LED control module with async animations."""
 
+import time
+
 import uasyncio as asyncio
 
 
@@ -404,6 +406,27 @@ class LEDController:
         self._current_task = asyncio.create_task(
             self._wipe_task(color, wait_ms, clear_after)
         )
+
+    def wipe_now(self, color, wait_ms=50, clear_after=False):
+        """
+        Wipe and return when done (blocking). For use before an event
+        loop runs, where wipe()'s task would wait for the loop.
+
+        Args:
+            color: Wipe color (RGB tuple or color name)
+            wait_ms: Delay between steps in milliseconds
+            clear_after: If True, clear LEDs after the wipe
+        """
+        self.stop()
+        color = self._normalize_color(color)
+        for i in range(self.num_leds):
+            self._set_pixel_driver(i, color)
+            self._show()
+            time.sleep_ms(wait_ms)
+        if clear_after:
+            time.sleep_ms(wait_ms * 2)
+            self._fill_driver((0, 0, 0))
+            self._show()
 
     @property
     def is_animating(self):
