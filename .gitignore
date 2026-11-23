@@ -1,0 +1,38 @@
+# Secrets - NEVER commit credentials!
+secrets.py
+wifi_config.json
+ota_config.json
+api_config.json
+ca-cert.pem
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# MicroPython
+*.mpy
+
+# Local storage/cache files
+user_cache.json
+*.log
+
+# IDE
+.vscode/
+.mypy_cache/
+.idea/
+*.swp
+*.swo
+*~
+TODO
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+# test_*.py
+# mock_*.py
+# Host build output (scripts/build.py)
+build/

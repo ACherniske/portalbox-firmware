@@ -1,0 +1,4 @@
+[submodule "micropython"]
+	path = micropython
+	url = https://github.com/h-milz/micropython.git
+	branch = ports/esp32/add-wpa2-enterprise
