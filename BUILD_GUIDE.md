@@ -2,6 +2,11 @@
 
 Complete step-by-step guide to build Micropython firmware with WPA2 Enterprise Wifi.
 
+Each GitHub release already carries this firmware, built by CI, as
+`portalbox-firmware-esp32s3.bin` (see README.md "Flash a new box from a
+release"). Follow this guide to build it yourself, for example to change the
+MicroPython build or to get the mpy-cross that `scripts/deploy.py` needs.
+
 ## Hardware
 - ESP32-S3 development board with quad PSRAM (`R2`, e.g. N8R2) or no PSRAM. Not octal PSRAM (`R8`): it uses GPIO35-37, which the card reader needs (see README).
 - USB cable for flashing

@@ -1,0 +1,62 @@
+# Publishes a release when a v* tag on main is pushed.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # Refuses a tag that is not on main before anything is built.
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - env:
+          TAG: ${{ github.ref_name }}
+        run: python scripts/release.py "$TAG" --from-tag --check-only
+
+  build:
+    needs: guard
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ github.ref_name }}
+
+  publish:
+    needs: [guard, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # build/ is gitignored, so release.py still sees a clean tree.
+      - uses: actions/download-artifact@v8
+        with:
+          name: bundle
+          path: build
+      - uses: actions/download-artifact@v8
+        with:
+          name: firmware
+          path: build
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          MICROPYTHON_SHA: ${{ needs.build.outputs.micropython_sha }}
+        run: |
+          python scripts/release.py "$TAG" --from-tag \
+            --bundle build/portalbox.bundle \
+            --attach build/portalbox-firmware-esp32s3.bin \
+            --notes "Firmware: MicroPython $MICROPYTHON_SHA (h-milz/micropython), ESP-IDF v5.5.1, ESP32_GENERIC_S3."
