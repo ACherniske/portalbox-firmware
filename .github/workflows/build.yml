@@ -1,0 +1,112 @@
+# Checks and builds shared by ci.yml and release.yml.
+name: Build
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version written into the bundle header
+        type: string
+        required: false
+        default: ci
+    outputs:
+      micropython_sha:
+        description: Commit of the micropython submodule the builds used
+        value: ${{ jobs.bundle.outputs.micropython_sha }}
+
+permissions:
+  contents: read
+
+env:
+  BOARD: ESP32_GENERIC_S3
+  IDF_VERSION: v5.5.1
+  FIRMWARE_BIN: portalbox-firmware-esp32s3.bin
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install ruff==0.17.6
+      - run: ruff check .
+      - run: ruff format --check .
+
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s scripts/tests
+
+  bundle:
+    runs-on: ubuntu-latest
+    outputs:
+      micropython_sha: ${{ steps.sub.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+      # The submodule's commit comes from the tree; no need to fetch it yet.
+      - id: sub
+        run: echo "sha=$(git rev-parse HEAD:micropython)" >> "$GITHUB_OUTPUT"
+      - id: mpy
+        uses: actions/cache@v6
+        with:
+          path: micropython/mpy-cross/build/mpy-cross
+          key: mpy-cross-${{ runner.os }}-${{ steps.sub.outputs.sha }}
+      - name: Build mpy-cross from the submodule
+        if: steps.mpy.outputs.cache-hit != 'true'
+        run: |
+          git submodule update --init --depth 1 micropython
+          make -C micropython/mpy-cross
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build the bundle
+        env:
+          MPY_CROSS: ${{ github.workspace }}/micropython/mpy-cross/build/mpy-cross
+          VERSION: ${{ inputs.version }}
+        run: python scripts/build.py --version "$VERSION"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bundle
+          path: build/portalbox.bundle
+          if-no-files-found: error
+
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - id: sub
+        run: echo "sha=$(git rev-parse HEAD:micropython)" >> "$GITHUB_OUTPUT"
+      - id: key
+        run: |
+          key="fw-$RUNNER_OS-idf${IDF_VERSION#v}-$BOARD-${{ steps.sub.outputs.sha }}"
+          echo "Firmware cache key: $key"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+      - id: fw
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.FIRMWARE_BIN }}
+          key: ${{ steps.key.outputs.key }}
+      # Runs only on a miss, so a cache hit never pulls the IDF image.
+      - name: Build the firmware in the ESP-IDF container
+        if: steps.fw.outputs.cache-hit != 'true'
+        run: |
+          git submodule update --init --depth 1 micropython
+          docker run --rm -v "$GITHUB_WORKSPACE:/project" -w /project \
+            -e BOARD "espressif/idf:$IDF_VERSION" bash -c '
+              set -e
+              git config --global --add safe.directory "*"
+              make -C micropython/ports/esp32 BOARD="$BOARD" submodules
+              make -C micropython/ports/esp32 BOARD="$BOARD"
+            '
+          cp "micropython/ports/esp32/build-$BOARD/firmware.bin" "$FIRMWARE_BIN"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: firmware
+          path: ${{ env.FIRMWARE_BIN }}
+          if-no-files-found: error
