@@ -215,11 +215,10 @@ class Device:
         if self.buzzer:
             self.buzzer.play(Buzzer.BEEP_TRIPLE)
 
-        # Startup LED animation
+        # Ready LED cue: blocking, so it finishes before the FSM's first
+        # feedback, and held blue until the idle pulse takes over.
         if self.led:
-            self.led.stop()
-
-            self.led.wipe("BLUE", wait_ms=30, clear_after=True)
+            self.led.wipe_now("BLUE", wait_ms=30)
 
         print("[Device] Startup sequence complete")
 

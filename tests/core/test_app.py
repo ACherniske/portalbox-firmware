@@ -157,7 +157,7 @@ def run():
 
     # --- startup report: once, before the FSM; never stops the app -------
 
-    def run_app_with_startup(startup):
+    def run_app_with_startup(startup, record_ready=False):
         """Run the app with fakes; returns the events in order."""
         events = []
 
@@ -176,6 +176,8 @@ def run():
             return startup()
 
         dev = FakeDevice()
+        if record_ready:
+            dev.startup_sequence = lambda: events.append("ready")
         patch.set(app_main, "get_device", lambda: dev)
         patch.set(app_main, "DeviceFSM", FakeFSM)
         patch.set(app_main, "cleanup_device", lambda: None)
@@ -190,6 +192,11 @@ def run():
         assert any(tag == "app" and "ok" in msg for tag, msg in logged), (
             "no log: %r" % logged
         )
+
+    def test_ready_cue_after_startup():
+        # the ready cue means ready: after the startup report, before cards
+        events = run_app_with_startup(lambda: "ok", record_ready=True)
+        assert events == ["startup", "ready", "fsm"], "events %r" % (events,)
 
     def test_startup_refused_keeps_running():
         events = run_app_with_startup(lambda: "not registered")
@@ -237,6 +244,10 @@ def run():
         ("FSM gets the hardware health check", test_fsm_gets_health_check),
         ("OTA loop survives a failed check", test_ota_loop_survives_error),
         ("Startup report goes to the server before the FSM", test_startup_before_fsm),
+        (
+            "Ready cue after the startup report, before the FSM",
+            test_ready_cue_after_startup,
+        ),
         (
             "Box not registered: logged, app keeps running",
             test_startup_refused_keeps_running,

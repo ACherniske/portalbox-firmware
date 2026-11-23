@@ -89,6 +89,10 @@ class Application:
         try:
             self.initialize()
 
+            # Ready cue only now: startup work done, cards next.
+            if self.device:
+                self.device.startup_sequence()
+
             asyncio.create_task(self._ota_loop())
 
             print("[APP] Starting FSM...")
