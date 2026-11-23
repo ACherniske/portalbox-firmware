@@ -18,55 +18,38 @@
 # ============================================================================
 
 USERS = {
-
     # =========================================================
     # Normal authorized user
     # =========================================================
-
-    '23BE9603': {
-        'name': 'Authorized User',
-        'auth': True,
-        'trainer': False,
-        'proxy': False
+    "23BE9603": {
+        "name": "Authorized User",
+        "auth": True,
+        "trainer": False,
+        "proxy": False,
     },
-
     # =========================================================
     # Trainer card
     # =========================================================
-
-    '73889103': {
-        'name': 'Trainer User',
-        'auth': True,
-        'trainer': True,
-        'proxy': False
-    },
-
+    "73889103": {"name": "Trainer User", "auth": True, "trainer": True, "proxy": False},
     # =========================================================
     # Proxy card
     # =========================================================
-
-    'C38EC002': {
-        'name': 'Proxy User',
-        'auth': True,
-        'trainer': False,
-        'proxy': True
-    },
-
+    "C38EC002": {"name": "Proxy User", "auth": True, "trainer": False, "proxy": True},
     # =========================================================
     # Unauthorized card
     # =========================================================
-
-    '83EE8F03': {
-        'name': 'Unauthorized User',
-        'auth': False,
-        'trainer': False,
-        'proxy': False
-    }
+    "83EE8F03": {
+        "name": "Unauthorized User",
+        "auth": False,
+        "trainer": False,
+        "proxy": False,
+    },
 }
 
 # ============================================================================
 # USER LOOKUP HELPERS
 # ============================================================================
+
 
 def get_user(uid):
     """
@@ -81,9 +64,11 @@ def get_user(uid):
 
     return USERS.get(uid)
 
+
 # ============================================================================
 # AUTH HELPERS
 # ============================================================================
+
 
 def is_auth(uid):
     """
@@ -102,7 +87,7 @@ def is_auth(uid):
         return False
 
     # Only a real True grants it: a reply's "false" or 1 must not.
-    return user.get('auth') is True
+    return user.get("auth") is True
 
 
 def is_trainer(uid):
@@ -121,7 +106,8 @@ def is_trainer(uid):
         return False
 
     # Only a real True grants it: a reply's "false" or 1 must not.
-    return user.get('trainer') is True
+    return user.get("trainer") is True
+
 
 def is_proxy(uid):
     """
@@ -139,12 +125,13 @@ def is_proxy(uid):
         return False
 
     # Only a real True grants it: a reply's "false" or 1 must not.
-    return user.get('proxy') is True
+    return user.get("proxy") is True
 
 
 # ============================================================================
 # SERVER CALLS (same answers as core.api)
 # ============================================================================
+
 
 def activate(uid):
     """(True, None) for an authorized card, else (False, None)."""
@@ -155,11 +142,11 @@ def change_card(activating_uid, new_uid):
     """As the server answers: 'user' for the same card, 'proxy' for a proxy
     card, 'training' when a trainer's session gets a known card, else None."""
     if new_uid == activating_uid:
-        return 'user'
+        return "user"
     if is_proxy(new_uid):
-        return 'proxy'
+        return "proxy"
     if is_trainer(activating_uid) and get_user(new_uid):
-        return 'training'
+        return "training"
     return None
 
 
@@ -168,4 +155,4 @@ def deactivate(uid):
 
 
 def startup():
-    return 'ok'
+    return "ok"

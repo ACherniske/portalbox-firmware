@@ -11,16 +11,16 @@ from net.models import WiFiConfig
 
 # Recovery paths are moved under ROOT so the suite never touches the box's
 # real state or log. Every fake below stands in for hardware or WiFi.
-ROOT = '/t_sys'
+ROOT = "/t_sys"
 
 _REDIRECTS = {
-    'STATE_PATH': ROOT + '/ota/state.json',
-    'JOURNAL_PATH': ROOT + '/ota/journal.json',
-    'PREV_DIR': ROOT + '/ota/prev',
-    'STAGE_DIR': ROOT + '/ota/stage',
-    'LOG_PATH': ROOT + '/log/events.log',
-    'DEV_FLAG_PATH': ROOT + '/config/dev_mode',
-    'LIVE_ROOT': ROOT + '/live',
+    "STATE_PATH": ROOT + "/ota/state.json",
+    "JOURNAL_PATH": ROOT + "/ota/journal.json",
+    "PREV_DIR": ROOT + "/ota/prev",
+    "STAGE_DIR": ROOT + "/ota/stage",
+    "LOG_PATH": ROOT + "/log/events.log",
+    "DEV_FLAG_PATH": ROOT + "/config/dev_mode",
+    "LIVE_ROOT": ROOT + "/live",
 }
 
 
@@ -34,7 +34,7 @@ def _is_dir(path):
 def _rm_tree(path):
     if _is_dir(path):
         for name in os.listdir(path):
-            _rm_tree(path + '/' + name)
+            _rm_tree(path + "/" + name)
         try:
             os.rmdir(path)
         except OSError:
@@ -48,14 +48,14 @@ def _rm_tree(path):
 
 def _read(path):
     try:
-        with open(path, 'r') as f:
+        with open(path, "r") as f:
             return f.read()
     except OSError:
         return None
 
 
 def _count():
-    return recovery.load_state()['crash_count']
+    return recovery.load_state()["crash_count"]
 
 
 def _exists(path):
@@ -67,20 +67,20 @@ def _exists(path):
 
 
 def _write_flag(path):
-    built = ''
-    for part in path.strip('/').split('/')[:-1]:
-        built += '/' + part
+    built = ""
+    for part in path.strip("/").split("/")[:-1]:
+        built += "/" + part
         try:
             os.mkdir(built)
         except OSError:
             pass
-    with open(path, 'w') as f:
-        f.write('')
+    with open(path, "w") as f:
+        f.write("")
 
 
 def _set_count(n):
     state = recovery.load_state()
-    state['crash_count'] = n
+    state["crash_count"] = n
     recovery.save_state(state)
 
 
@@ -127,16 +127,16 @@ class _FakeNIC:
         pass
 
     def ifconfig(self):
-        return ('10.0.0.2', '255.255.255.0', '10.0.0.1', '10.0.0.1')
+        return ("10.0.0.2", "255.255.255.0", "10.0.0.1", "10.0.0.1")
 
 
 def _wifi_manager(script):
     config = WiFiConfig()
-    config.set_wpa2_psk('net', 'password123')
+    config.set_wpa2_psk("net", "password123")
     config.timeout = 10
     mgr = wifi.WifiManager(config=config, verbose=False)
     mgr.nic = _FakeNIC(script)
-    mgr._sync_time = lambda: None   # no real network for NTP
+    mgr._sync_time = lambda: None  # no real network for NTP
     mgr._pre_status = 1000
     return mgr
 
@@ -161,7 +161,7 @@ def run():
     runner = TestRunner()
 
     real = {name: getattr(recovery, name) for name in _REDIRECTS}
-    real_files = {p: _read(p) for p in (real['STATE_PATH'], real['LOG_PATH'])}
+    real_files = {p: _read(p) for p in (real["STATE_PATH"], real["LOG_PATH"])}
     for name, path in _REDIRECTS.items():
         setattr(recovery, name, path)
 
@@ -175,11 +175,12 @@ def run():
             finally:
                 patch.undo()
                 asyncio.new_event_loop()
+
         return wrapped
 
     def feed_counter():
         feeds = []
-        patch.set(recovery, 'feed', lambda: feeds.append(1))
+        patch.set(recovery, "feed", lambda: feeds.append(1))
         return feeds
 
     # --- WiFi failure: reset without counting a crash ---------------------
@@ -188,25 +189,29 @@ def run():
         _set_count(1)
         events = []
         counts = []
-        patch.set(recovery, 'feed', lambda: events.append('feed'))
+        patch.set(recovery, "feed", lambda: events.append("feed"))
 
         def fake_sleep(s):
-            events.append('sleep %s' % s)
+            events.append("sleep %s" % s)
             counts.append(_count())
 
-        system._wifi_retry_reset(2, sleep=fake_sleep,
-                                 reset=lambda: events.append('reset'))
-        assert events == ['feed', 'sleep 1', 'feed', 'sleep 1', 'reset'], \
+        system._wifi_retry_reset(
+            2, sleep=fake_sleep, reset=lambda: events.append("reset")
+        )
+        assert events == ["feed", "sleep 1", "feed", "sleep 1", "reset"], (
             "events %r" % (events,)
-        assert counts == [0, 0], "count while waiting %r, want 0 (undone first)" % (counts,)
-        log = _read(recovery.LOG_PATH) or ''
-        assert 'wifi failed, reset in 2 s' in log, "log %r" % log
+        )
+        assert counts == [0, 0], "count while waiting %r, want 0 (undone first)" % (
+            counts,
+        )
+        log = _read(recovery.LOG_PATH) or ""
+        assert "wifi failed, reset in 2 s" in log, "log %r" % log
 
     # --- Healthy mark: from the FSM loop, not a separate timer -------------
 
     def fsm_with(update):
         """A DeviceFSM with a fake device and the given update coroutine."""
-        patch.set(fsm_mod, 'get_device', lambda: _Anything())
+        patch.set(fsm_mod, "get_device", lambda: _Anything())
         machine_ = fsm_mod.DeviceFSM()
         machine_._apply_state = lambda: None
         machine_.update = update
@@ -222,8 +227,11 @@ def run():
                 machine_.running = False
 
         machine_ = fsm_with(update)
-        asyncio.run(machine_.run(mark_healthy=lambda: calls.append(len(loops)),
-                                 healthy_after_ms=150))
+        asyncio.run(
+            machine_.run(
+                mark_healthy=lambda: calls.append(len(loops)), healthy_after_ms=150
+            )
+        )
         # Loops are ~100 ms apart: not on the first pass, then exactly once.
         assert len(calls) == 1, "marked %d times in %d loops" % (len(calls), len(loops))
         assert calls[0] >= 2, "marked on loop %d, before the delay" % calls[0]
@@ -246,8 +254,9 @@ def run():
 
         async def go():
             asyncio.create_task(watch())
-            await machine_.run(mark_healthy=lambda: calls.append(1),
-                               healthy_after_ms=100)
+            await machine_.run(
+                mark_healthy=lambda: calls.append(1), healthy_after_ms=100
+            )
 
         asyncio.run(go())
         assert seen == [0], "marked healthy while the loop was wedged (%r)" % (seen,)
@@ -256,25 +265,25 @@ def run():
 
     def fake_app(fsm_run):
         """Patch core.main so Application uses fakes; returns the record."""
-        rec = {'healthy': [], 'cleanup': 0, 'stop': 0}
+        rec = {"healthy": [], "cleanup": 0, "stop": 0}
 
         class FakeFSM:
             def __init__(self):
                 pass
 
             async def run(self, mark_healthy=None, healthy_after_ms=None):
-                rec['healthy'].append((mark_healthy, healthy_after_ms))
+                rec["healthy"].append((mark_healthy, healthy_after_ms))
                 await fsm_run()
 
             def stop(self):
-                rec['stop'] += 1
+                rec["stop"] += 1
 
         def fake_cleanup():
-            rec['cleanup'] += 1
+            rec["cleanup"] += 1
 
-        patch.set(app_main, 'get_device', lambda: _Anything())
-        patch.set(app_main, 'DeviceFSM', FakeFSM)
-        patch.set(app_main, 'cleanup_device', fake_cleanup)
+        patch.set(app_main, "get_device", lambda: _Anything())
+        patch.set(app_main, "DeviceFSM", FakeFSM)
+        patch.set(app_main, "cleanup_device", fake_cleanup)
         return rec
 
     def test_app_starts_healthy():
@@ -285,22 +294,24 @@ def run():
 
         class WorkingDevice(_Anything):
             def get_status(self):
-                return {'rfid': True, 'relay': True}
+                return {"rfid": True, "relay": True}
 
-        patch.set(app_main, 'get_device', lambda: WorkingDevice())
-        assert app_main.HEALTHY_AFTER_S == 60, "HEALTHY_AFTER_S %r" % app_main.HEALTHY_AFTER_S
+        patch.set(app_main, "get_device", lambda: WorkingDevice())
+        assert app_main.HEALTHY_AFTER_S == 60, (
+            "HEALTHY_AFTER_S %r" % app_main.HEALTHY_AFTER_S
+        )
         asyncio.run(app_main.Application().run())
-        assert len(rec['healthy']) == 1, "fsm.run calls %r" % (rec['healthy'],)
-        mark, after = rec['healthy'][0]
+        assert len(rec["healthy"]) == 1, "fsm.run calls %r" % (rec["healthy"],)
+        mark, after = rec["healthy"][0]
         assert after == 60000, "healthy_after_ms %r, want 60000" % (after,)
         marks = []
-        patch.set(recovery, 'mark_healthy', lambda: marks.append(1))
+        patch.set(recovery, "mark_healthy", lambda: marks.append(1))
         mark()
         assert marks == [1], "the hook did not call recovery.mark_healthy"
 
     def test_app_crash_reraises():
         async def fsm_run():
-            raise ValueError('boom')
+            raise ValueError("boom")
 
         rec = fake_app(fsm_run)
         try:
@@ -309,7 +320,7 @@ def run():
         except ValueError as e:
             raised = e
         assert raised is not None, "crash was swallowed"
-        assert rec['stop'] == 1 and rec['cleanup'] == 1, "shutdown %r" % (rec,)
+        assert rec["stop"] == 1 and rec["cleanup"] == 1, "shutdown %r" % (rec,)
 
     def test_app_interrupt_reraises():
         async def fsm_run():
@@ -322,13 +333,13 @@ def run():
         except KeyboardInterrupt:
             raised = True
         assert raised, "interrupt was swallowed"
-        assert rec['stop'] == 1 and rec['cleanup'] == 1, "shutdown %r" % (rec,)
+        assert rec["stop"] == 1 and rec["cleanup"] == 1, "shutdown %r" % (rec,)
 
     # --- Watchdog feeding -------------------------------------------------
 
     def test_fsm_feeds():
         feeds = feed_counter()
-        patch.set(fsm_mod, 'get_device', lambda: _Anything())
+        patch.set(fsm_mod, "get_device", lambda: _Anything())
         machine_ = fsm_mod.DeviceFSM()
         machine_._apply_state = lambda: None
         loops = []
@@ -345,146 +356,187 @@ def run():
     def test_wifi_wait_feeds():
         feeds = feed_counter()
         mgr = _wifi_manager([1001, 1001, 1010])
-        assert mgr._wait_for_connection() is True, "did not connect: %r" % mgr.last_error
+        assert mgr._wait_for_connection() is True, (
+            "did not connect: %r" % mgr.last_error
+        )
         assert len(feeds) >= 2, "%d feeds over %d polls" % (len(feeds), mgr.nic.polls)
 
     def test_wifi_time_sync_fed():
         # NTP's DNS lookup can block for seconds: feed before and after it.
         events = []
-        patch.set(recovery, 'feed', lambda: events.append('feed'))
+        patch.set(recovery, "feed", lambda: events.append("feed"))
         # The wait loop's own fed sleep must not count as the feed before NTP.
-        patch.set(wifi, '_sleep_fed', lambda s: events.append('wait'))
+        patch.set(wifi, "_sleep_fed", lambda s: events.append("wait"))
         mgr = _wifi_manager([1010])
-        mgr._sync_time = lambda: events.append('ntp')
-        assert mgr._wait_for_connection() is True, "did not connect: %r" % mgr.last_error
-        i = events.index('ntp')
+        mgr._sync_time = lambda: events.append("ntp")
+        assert mgr._wait_for_connection() is True, (
+            "did not connect: %r" % mgr.last_error
+        )
+        i = events.index("ntp")
         assert 0 < i < len(events) - 1, "ntp not between feeds: %r" % (events,)
-        assert events[i - 1] == 'feed' and events[i + 1] == 'feed', "events %r" % (events,)
+        assert events[i - 1] == "feed" and events[i + 1] == "feed", "events %r" % (
+            events,
+        )
 
     def test_wifi_retry_reset_dev_mode():
         # A bench board without WiFi: no reset loop, no state written.
         _write_flag(recovery.DEV_FLAG_PATH)
         resets = []
-        system._wifi_retry_reset(2, sleep=lambda s: None,
-                                 reset=lambda: resets.append(1))
+        system._wifi_retry_reset(
+            2, sleep=lambda s: None, reset=lambda: resets.append(1)
+        )
         assert resets == [], "dev mode reset the box"
         assert not _exists(recovery.STATE_PATH), "dev mode wrote state"
 
     def test_boot_returns_on_dev_wifi_fail():
-        rec = fake_boot(wifi_ok=False)
-        patch.set(system, '_wifi_retry_reset', lambda *a, **k: None)
+        fake_boot(wifi_ok=False)
+        patch.set(system, "_wifi_retry_reset", lambda *a, **k: None)
         main_calls = []
-        patch.set(system, 'main', lambda: main_calls.append(1))
+        patch.set(system, "main", lambda: main_calls.append(1))
         got = boot_outcome()
-        assert got == 'returned', "boot %s" % got
+        assert got == "returned", "boot %s" % got
         assert main_calls == [], "app started without WiFi"
 
     def test_boot_feeds_before_app():
         fake_boot(wifi_ok=True)
         events = []
-        patch.set(recovery, 'feed', lambda: events.append('feed'))
-        for name in ('_print_connection_status', '_print_storage_info', '_run_ota'):
+        patch.set(recovery, "feed", lambda: events.append("feed"))
+        for name in ("_print_connection_status", "_print_storage_info", "_run_ota"):
             patch.set(system, name, lambda *a, **k: None)
-        patch.set(system, 'main', lambda: events.append('main'))
+        patch.set(system, "main", lambda: events.append("main"))
         got = boot_outcome()
-        assert got == 'returned', "boot %s" % got
-        assert events[-2:] == ['feed', 'main'], "events %r" % (events,)
+        assert got == "returned", "boot %s" % got
+        assert events[-2:] == ["feed", "main"], "events %r" % (events,)
 
     def test_wifi_retry_delay_feeds():
         feeds = feed_counter()
         mgr = _wifi_manager([1001])
         mgr.config.retry_attempts = 2
         mgr.config.retry_delay = 3
-        mgr._init_interface = lambda: False   # fail each attempt at once
-        assert mgr.connect_with_retry('pw') is False, "reported connected"
+        mgr._init_interface = lambda: False  # fail each attempt at once
+        assert mgr.connect_with_retry("pw") is False, "reported connected"
         assert len(feeds) == 3, "%d feeds in a 3 s retry delay, want 3" % len(feeds)
 
     # --- boot(): which failure leads where ---------------------------------
 
-    def fake_boot(config_ok=True, password='pw', wifi_ok=False):
-        rec = {'stuck': [], 'retry': 0, 'connect': 0}
+    def fake_boot(config_ok=True, password="pw", wifi_ok=False):
+        rec = {"stuck": [], "retry": 0, "connect": 0}
 
         def stuck(reason, *args, **kwargs):
-            rec['stuck'].append(reason)
+            rec["stuck"].append(reason)
             raise _Stuck()
 
         def retry(*args, **kwargs):
-            rec['retry'] += 1
+            rec["retry"] += 1
             raise _Retried()
 
         def connect(config, pw):
-            rec['connect'] += 1
+            rec["connect"] += 1
             return _Anything() if wifi_ok else None
 
         class FakeConfig:
             pass
 
-        patch.set(system, '_start_wifi_driver', lambda: None)   # no radio in fakes
-        patch.set(system, 'get_device', lambda: _Anything())
-        patch.set(system, 'apply_feedback', lambda *a, **k: None)
-        patch.set(system, 'WiFiConfig', FakeConfig)
-        patch.set(system, '_load_wifi_config', lambda c: config_ok)
-        patch.set(system, '_get_password', lambda c: password)
-        patch.set(system, '_connect_wifi', connect)
-        patch.set(system, '_wifi_retry_reset', retry)
-        patch.set(recovery, 'stuck_forever', stuck)
+        patch.set(system, "_start_wifi_driver", lambda: None)  # no radio in fakes
+        patch.set(system, "get_device", lambda: _Anything())
+        patch.set(system, "apply_feedback", lambda *a, **k: None)
+        patch.set(system, "WiFiConfig", FakeConfig)
+        patch.set(system, "_load_wifi_config", lambda c: config_ok)
+        patch.set(system, "_get_password", lambda c: password)
+        patch.set(system, "_connect_wifi", connect)
+        patch.set(system, "_wifi_retry_reset", retry)
+        patch.set(recovery, "stuck_forever", stuck)
         return rec
 
     def boot_outcome():
         try:
             system.boot()
         except _Stuck:
-            return 'stuck'
+            return "stuck"
         except _Retried:
-            return 'retry'
-        return 'returned'
+            return "retry"
+        return "returned"
 
     def test_boot_starts_wifi_driver_first():
         # The driver's one-time setup takes ~22 KB of ESP-IDF RAM; it must
         # happen before anything can grow the Python heap into the reserve.
         fake_boot(wifi_ok=False)
         events = []
-        patch.set(system, '_start_wifi_driver', lambda: events.append('wifi driver'))
-        patch.set(system, 'get_device', lambda: events.append('hardware') or _Anything())
-        patch.set(system, '_wifi_retry_reset', lambda *a, **k: None)
+        patch.set(system, "_start_wifi_driver", lambda: events.append("wifi driver"))
+        patch.set(
+            system, "get_device", lambda: events.append("hardware") or _Anything()
+        )
+        patch.set(system, "_wifi_retry_reset", lambda *a, **k: None)
         boot_outcome()
-        assert events[:2] == ['wifi driver', 'hardware'], "boot order %r" % (events,)
+        assert events[:2] == ["wifi driver", "hardware"], "boot order %r" % (events,)
 
     def test_boot_no_config_stuck():
         rec = fake_boot(config_ok=False)
         got = boot_outcome()
-        assert got == 'stuck' and rec['stuck'] == ['wifi config'], "%s %r" % (got, rec)
-        assert rec['connect'] == 0, "tried to connect without a config"
+        assert got == "stuck" and rec["stuck"] == ["wifi config"], "%s %r" % (got, rec)
+        assert rec["connect"] == 0, "tried to connect without a config"
 
     def test_boot_bad_password_stuck():
         rec = fake_boot(password=None)
         got = boot_outcome()
-        assert got == 'stuck' and rec['stuck'] == ['wifi config'], "%s %r" % (got, rec)
-        assert rec['connect'] == 0, "tried to connect without a password"
+        assert got == "stuck" and rec["stuck"] == ["wifi config"], "%s %r" % (got, rec)
+        assert rec["connect"] == 0, "tried to connect without a password"
 
     def test_boot_connect_fail_retries():
         rec = fake_boot(wifi_ok=False)
         got = boot_outcome()
-        assert got == 'retry' and rec['retry'] == 1, "%s %r" % (got, rec)
-        assert rec['stuck'] == [], "WiFi outage showed stuck %r" % (rec['stuck'],)
+        assert got == "retry" and rec["retry"] == 1, "%s %r" % (got, rec)
+        assert rec["stuck"] == [], "WiFi outage showed stuck %r" % (rec["stuck"],)
 
-    runner.run_test("WiFi failure resets without counting", fresh(test_wifi_retry_reset))
-    runner.run_test("Healthy marked once, from the FSM loop", fresh(test_healthy_once_from_loop))
-    runner.run_test("No healthy mark while the loop is wedged", fresh(test_healthy_not_while_wedged))
-    runner.run_test("App asks the FSM for healthy after 60 s", fresh(test_app_starts_healthy))
-    runner.run_test("App crash re-raised after shutdown", fresh(test_app_crash_reraises))
-    runner.run_test("App interrupt re-raised after shutdown", fresh(test_app_interrupt_reraises))
+    runner.run_test(
+        "WiFi failure resets without counting", fresh(test_wifi_retry_reset)
+    )
+    runner.run_test(
+        "Healthy marked once, from the FSM loop", fresh(test_healthy_once_from_loop)
+    )
+    runner.run_test(
+        "No healthy mark while the loop is wedged", fresh(test_healthy_not_while_wedged)
+    )
+    runner.run_test(
+        "App asks the FSM for healthy after 60 s", fresh(test_app_starts_healthy)
+    )
+    runner.run_test(
+        "App crash re-raised after shutdown", fresh(test_app_crash_reraises)
+    )
+    runner.run_test(
+        "App interrupt re-raised after shutdown", fresh(test_app_interrupt_reraises)
+    )
     runner.run_test("FSM loop feeds the watchdog", fresh(test_fsm_feeds))
     runner.run_test("WiFi wait loop feeds the watchdog", fresh(test_wifi_wait_feeds))
-    runner.run_test("WiFi retry delay feeds each second", fresh(test_wifi_retry_delay_feeds))
-    runner.run_test("NTP time sync is fed on both sides", fresh(test_wifi_time_sync_fed))
-    runner.run_test("Dev mode: WiFi failure does not reset", fresh(test_wifi_retry_reset_dev_mode))
-    runner.run_test("Dev mode: boot returns after WiFi failure", fresh(test_boot_returns_on_dev_wifi_fail))
-    runner.run_test("Watchdog fed just before the app starts", fresh(test_boot_feeds_before_app))
-    runner.run_test("No WiFi config: stuck 'wifi config'", fresh(test_boot_no_config_stuck))
-    runner.run_test("Bad WiFi password: stuck 'wifi config'", fresh(test_boot_bad_password_stuck))
-    runner.run_test("WiFi connect failure: retry by reset", fresh(test_boot_connect_fail_retries))
-    runner.run_test("WiFi driver starts before the hardware", fresh(test_boot_starts_wifi_driver_first))
+    runner.run_test(
+        "WiFi retry delay feeds each second", fresh(test_wifi_retry_delay_feeds)
+    )
+    runner.run_test(
+        "NTP time sync is fed on both sides", fresh(test_wifi_time_sync_fed)
+    )
+    runner.run_test(
+        "Dev mode: WiFi failure does not reset", fresh(test_wifi_retry_reset_dev_mode)
+    )
+    runner.run_test(
+        "Dev mode: boot returns after WiFi failure",
+        fresh(test_boot_returns_on_dev_wifi_fail),
+    )
+    runner.run_test(
+        "Watchdog fed just before the app starts", fresh(test_boot_feeds_before_app)
+    )
+    runner.run_test(
+        "No WiFi config: stuck 'wifi config'", fresh(test_boot_no_config_stuck)
+    )
+    runner.run_test(
+        "Bad WiFi password: stuck 'wifi config'", fresh(test_boot_bad_password_stuck)
+    )
+    runner.run_test(
+        "WiFi connect failure: retry by reset", fresh(test_boot_connect_fail_retries)
+    )
+    runner.run_test(
+        "WiFi driver starts before the hardware",
+        fresh(test_boot_starts_wifi_driver_first),
+    )
 
     # Leave the board as we found it.
     _rm_tree(ROOT)

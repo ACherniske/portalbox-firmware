@@ -8,13 +8,16 @@ import sys
 
 try:
     import recovery
+
     recovery.relays_low()
 except BaseException as e:
     # A broken recovery.py must not stop main.py from running: MicroPython
     # skips main.py when boot.py fails. Turn the relays off by hand.
     import machine
+
     try:
         from config.pins import RELAY_AC_PIN, RELAY_USB_PIN
+
         relay_pins = (RELAY_AC_PIN, RELAY_USB_PIN)
     except BaseException:
         relay_pins = (18, 9)
@@ -24,13 +27,13 @@ except BaseException as e:
         except Exception:
             pass
     try:
-        print('[BOOT] recovery failed in boot.py: %r' % (e,))
+        print("[BOOT] recovery failed in boot.py: %r" % (e,))
     except BaseException:
         pass
 
 # Forget the module so a tool that copies a new recovery.py and then
 # imports it in the same session gets the new file, not this one.
-sys.modules.pop('recovery', None)
+sys.modules.pop("recovery", None)
 try:
     del recovery
 except NameError:

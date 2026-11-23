@@ -17,7 +17,7 @@ import machine
 CLOCK_FLOOR = (2026, 11, 4)
 
 # One integer: time.time() seconds (board epoch is 2000-01-01).
-SAVED_TIME_FILE = '/config/last_time.txt'
+SAVED_TIME_FILE = "/config/last_time.txt"
 
 AUTOSAVE_TIMER_ID = 0
 AUTOSAVE_PERIOD_MS = 3_600_000
@@ -28,7 +28,7 @@ _autosave_timer = None
 def load_saved():
     """Return the saved time in seconds, or None if missing or unreadable."""
     try:
-        with open(SAVED_TIME_FILE, 'r') as f:
+        with open(SAVED_TIME_FILE, "r") as f:
             return int(f.read().strip())
     except (OSError, ValueError):
         return None
@@ -38,10 +38,10 @@ def save_now():
     """Save the current time. Returns True on success."""
     try:
         try:
-            os.mkdir('/config')
+            os.mkdir("/config")
         except OSError:
             pass
-        with open(SAVED_TIME_FILE, 'w') as f:
+        with open(SAVED_TIME_FILE, "w") as f:
             f.write(str(time.time()))
         return True
     except OSError as e:
@@ -78,5 +78,6 @@ def start_autosave():
     if _autosave_timer is not None:
         return
     _autosave_timer = machine.Timer(AUTOSAVE_TIMER_ID)
-    _autosave_timer.init(period=AUTOSAVE_PERIOD_MS, mode=machine.Timer.PERIODIC,
-                         callback=_autosave_tick)
+    _autosave_timer.init(
+        period=AUTOSAVE_PERIOD_MS, mode=machine.Timer.PERIODIC, callback=_autosave_tick
+    )

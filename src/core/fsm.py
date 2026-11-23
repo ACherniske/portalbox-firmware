@@ -28,13 +28,13 @@ class States:
 
 
 STATE_NAMES = {
-    States.IDLE: 'idle',
-    States.AUTH: 'auth',
-    States.NOAUTH: 'noauth',
-    States.GRACE: 'grace',
-    States.PROXY: 'proxy',
-    States.TRAINING: 'training',
-    States.TIMEOUT: 'timeout'
+    States.IDLE: "idle",
+    States.AUTH: "auth",
+    States.NOAUTH: "noauth",
+    States.GRACE: "grace",
+    States.PROXY: "proxy",
+    States.TRAINING: "training",
+    States.TIMEOUT: "timeout",
 }
 
 # idle_ms() stops growing here (1 day): well past the 10 idle minutes an
@@ -49,19 +49,10 @@ SESSION_TIMEOUT_CAP_MS = (1 << 29) - 3600 * 1000
 # This is an authorization decision the FSM owns directly — unlike
 # LED/buzzer feedback, it is not cosmetic and does not belong in
 # core/feedback.py's profile table.
-_RELAY_ON_STATES = (
-    States.AUTH,
-    States.GRACE,
-    States.PROXY,
-    States.TRAINING
-)
+_RELAY_ON_STATES = (States.AUTH, States.GRACE, States.PROXY, States.TRAINING)
 
 # States with a card in the reader that holds the session.
-_SESSION_STATES = (
-    States.AUTH,
-    States.PROXY,
-    States.TRAINING
-)
+_SESSION_STATES = (States.AUTH, States.PROXY, States.TRAINING)
 
 
 class DeviceFSM:
@@ -156,10 +147,7 @@ class DeviceFSM:
     def _state_elapsed(self):
         """Get milliseconds elapsed since entering current state."""
 
-        return time.ticks_diff(
-            time.ticks_ms(),
-            self.state_start_time
-        )
+        return time.ticks_diff(time.ticks_ms(), self.state_start_time)
 
     def idle_ms(self):
         """Milliseconds since entering IDLE, at most IDLE_MS_CAP; 0 when not IDLE.
@@ -187,29 +175,19 @@ class DeviceFSM:
 
         if device_timeout_ms is None:
             device_timeout_ms = getattr(
-                settings,
-                'DEVICE_TIMEOUT_MS',
-                getattr(settings, 'device_timeout_ms', 0)
+                settings, "DEVICE_TIMEOUT_MS", getattr(settings, "device_timeout_ms", 0)
             )
 
-        return (
-            self._state_elapsed()
-            >= min(device_timeout_ms, SESSION_TIMEOUT_CAP_MS)
-        )
+        return self._state_elapsed() >= min(device_timeout_ms, SESSION_TIMEOUT_CAP_MS)
 
     def _grace_timeout_expired(self):
         """Check if grace timeout has expired."""
 
         grace_timeout_ms = getattr(
-            settings,
-            'GRACE_TIMEOUT_MS',
-            getattr(settings, 'grace_period_ms', 0)
+            settings, "GRACE_TIMEOUT_MS", getattr(settings, "grace_period_ms", 0)
         )
 
-        return (
-            self._state_elapsed()
-            >= grace_timeout_ms
-        )
+        return self._state_elapsed() >= grace_timeout_ms
 
     def _card_removed(self, card_present):
         """Debounced card-removal detector for stable state transitions."""
@@ -220,10 +198,7 @@ class DeviceFSM:
 
         self._card_absent_polls += 1
 
-        return (
-            self._card_absent_polls
-            >= self._card_absent_polls_required
-        )
+        return self._card_absent_polls >= self._card_absent_polls_required
 
     # =========================================================================
     # Hardware State Application
@@ -245,10 +220,7 @@ class DeviceFSM:
         else:
             self.device.relays_off()
 
-        apply_feedback(
-            self.device,
-            STATE_NAMES[self.state]
-        )
+        apply_feedback(self.device, STATE_NAMES[self.state])
 
     # =========================================================================
     # Card Handling
@@ -299,36 +271,26 @@ class DeviceFSM:
 
         mode = api.change_card(self.current_uid, uid)
 
-        if mode == 'proxy':
-
-            self._set_state(
-                States.PROXY
-            )
+        if mode == "proxy":
+            self._set_state(States.PROXY)
 
         # Known server limit: the server says 'training' for any user card
         # when the session's user may train, even one authorized on its own,
         # so a trainer cannot hand off to an authorized user.
-        elif mode == 'training':
-
+        elif mode == "training":
             self.trainer_uid = self.current_uid
             self.trainee_uid = uid
 
-            self._set_state(
-                States.TRAINING
-            )
+            self._set_state(States.TRAINING)
 
-        elif mode == 'user':
-
-            self._set_state(
-                States.AUTH
-            )
+        elif mode == "user":
+            self._set_state(States.AUTH)
 
         # Refused, or no answer: hand off. The old session ends and the new
         # card gets its own; power stays on until the server refuses the new
         # card. A slow server must not stretch grace: once it runs out, power
         # off (IDLE).
         else:
-
             if self._grace_timeout_expired():
                 self._set_state(States.IDLE)
                 return
@@ -365,9 +327,7 @@ class DeviceFSM:
         # =========================================================
 
         if self.state == States.IDLE:
-
             if uid:
-
                 print(f"[FSM] Card detected: {uid}")
 
                 self.card_uid = uid
@@ -379,73 +339,51 @@ class DeviceFSM:
         # =========================================================
 
         elif self.state == States.AUTH:
-
             if self._card_removed(card_present):
-
-                self._set_state(
-                    States.GRACE
-                )
+                self._set_state(States.GRACE)
 
             elif self._device_timeout_expired():
-
-                self._set_state(
-                    States.TIMEOUT
-                )
+                self._set_state(States.TIMEOUT)
 
         # =========================================================
         # NOAUTH
         # =========================================================
 
         elif self.state == States.NOAUTH:
-
             if self._card_removed(card_present):
-
-                self._set_state(
-                    States.IDLE
-                )
+                self._set_state(States.IDLE)
 
         # =========================================================
         # GRACE
         # =========================================================
 
         elif self.state == States.GRACE:
-
             # -----------------------------------------------------
             # Manual cancel button
             # -----------------------------------------------------
 
             if self.device.button_pressed:
-
-                self._set_state(
-                    States.IDLE
-                )
+                self._set_state(States.IDLE)
 
             # -----------------------------------------------------
             # Grace timeout expired
             # -----------------------------------------------------
 
             elif self._grace_timeout_expired():
-
-                self._set_state(
-                    States.IDLE
-                )
+                self._set_state(States.IDLE)
 
             # -----------------------------------------------------
             # Card scanned during grace
             # -----------------------------------------------------
 
             elif uid:
-
                 print(f"[FSM] Grace card detected: {uid}")
 
                 self.card_uid = uid
 
                 # The card that started the session: resume, no server call.
                 if uid == self.current_uid:
-
-                    self._set_state(
-                        States.AUTH
-                    )
+                    self._set_state(States.AUTH)
 
                     return
 
@@ -461,48 +399,30 @@ class DeviceFSM:
         # =========================================================
 
         elif self.state == States.PROXY:
-
             if self._card_removed(card_present):
-
-                self._set_state(
-                    States.GRACE
-                )
+                self._set_state(States.GRACE)
 
             elif self._device_timeout_expired():
-
-                self._set_state(
-                    States.TIMEOUT
-                )
+                self._set_state(States.TIMEOUT)
 
         # =========================================================
         # TRAINING
         # =========================================================
 
         elif self.state == States.TRAINING:
-
             if self._card_removed(card_present):
-
-                self._set_state(
-                    States.IDLE
-                )
+                self._set_state(States.IDLE)
 
             elif self._device_timeout_expired():
-
-                self._set_state(
-                    States.TIMEOUT
-                )
+                self._set_state(States.TIMEOUT)
 
         # =========================================================
         # TIMEOUT
         # =========================================================
 
         elif self.state == States.TIMEOUT:
-
             if self._card_removed(card_present):
-
-                self._set_state(
-                    States.IDLE
-                )
+                self._set_state(States.IDLE)
 
     # =========================================================================
     # Main Loop
@@ -526,12 +446,14 @@ class DeviceFSM:
         start = time.ticks_ms()
 
         while self.running:
-
             await self.update()
 
             recovery.feed()
 
-            if mark_healthy is not None and                     time.ticks_diff(time.ticks_ms(), start) >= healthy_after_ms:
+            if (
+                mark_healthy is not None
+                and time.ticks_diff(time.ticks_ms(), start) >= healthy_after_ms
+            ):
                 mark_healthy()
                 mark_healthy = None
 

@@ -22,47 +22,47 @@ from net import https, ota_stage, ota_target
 from net.https import HttpError
 from net.ota_target import OtaError
 
-_API = 'https://api.github.com'
+_API = "https://api.github.com"
 # The release asset's bytes, not its JSON description. GitHub answers with a
 # redirect to its asset host; https drops the token on that hop.
-_ASSET_MEDIA = 'application/octet-stream'
-_CONFIG_PATH = '/config/ota_config.json'
-_OTA_STATE_PATH = '/config/ota_state.json'
-_OTA_INTERVAL_SECONDS = 24 * 60 * 60   # wait after a good check
-_RETRY_AFTER_FAIL_S = 60 * 60          # wait after a failed one
-IDLE_BEFORE_UPDATE_MS = 600000         # idle this long before an idle check
-CHECK_EVERY_S = 60                     # how often the app asks due()
+_ASSET_MEDIA = "application/octet-stream"
+_CONFIG_PATH = "/config/ota_config.json"
+_OTA_STATE_PATH = "/config/ota_state.json"
+_OTA_INTERVAL_SECONDS = 24 * 60 * 60  # wait after a good check
+_RETRY_AFTER_FAIL_S = 60 * 60  # wait after a failed one
+IDLE_BEFORE_UPDATE_MS = 600000  # idle this long before an idle check
+CHECK_EVERY_S = 60  # how often the app asks due()
 # 2023-11-14 on the board's own epoch (2000 on this port, not 1970).
 _MIN_VALID_EPOCH = time.mktime((2023, 11, 14, 0, 0, 0, 0, 0))
 _PROTECTED_PATHS = [
     # backup()/restore() leave device-local and runtime paths alone
     _CONFIG_PATH,
-    '/config/wifi_config.json',
-    '/ota.backup',
-    '/ota_log.txt',
-    '/lib',
-    '/sd',
-    '/config',
-    '/ca-cert.pem',
+    "/config/wifi_config.json",
+    "/ota.backup",
+    "/ota_log.txt",
+    "/lib",
+    "/sd",
+    "/config",
+    "/ca-cert.pem",
 ]
 
 
 def _git_blob_hash(data):
     """Return the Git blob SHA1 for the given bytes or text."""
     if isinstance(data, str):
-        data = data.encode('utf-8')
-    header = ('blob %d\0' % len(data)).encode('utf-8')
+        data = data.encode("utf-8")
+    header = ("blob %d\0" % len(data)).encode("utf-8")
     sha = hashlib.sha1(header + data)
-    return binascii.hexlify(sha.digest()).decode('utf-8')
+    return binascii.hexlify(sha.digest()).decode("utf-8")
 
 
 def _local_file_hash(filepath):
     """Return the Git-compatible blob hash for a local file."""
     try:
-        with open(filepath, 'rb') as file_handle:
+        with open(filepath, "rb") as file_handle:
             data = file_handle.read()
     except Exception:
-        data = b''
+        data = b""
     return _git_blob_hash(data)
 
 
@@ -74,13 +74,13 @@ def _is_directory(path):
         return False
 
 
-def _build_internal_tree(path='/'):
+def _build_internal_tree(path="/"):
     """Recursively hash the local filesystem into a path-to-SHA map."""
     tree = {}
     os.chdir(path)
 
     for item in os.listdir():
-        full = path + item if path.endswith('/') else path + '/' + item
+        full = path + item if path.endswith("/") else path + "/" + item
         if _is_directory(full):
             if os.listdir(full):
                 tree.update(_build_internal_tree(full))
@@ -90,13 +90,13 @@ def _build_internal_tree(path='/'):
             except OSError:
                 pass
 
-    os.chdir('/')
+    os.chdir("/")
     return tree
 
 
 def _get_storage_info():
     """Return total, free, and used storage in bytes."""
-    stat = os.statvfs('/')
+    stat = os.statvfs("/")
     block_size = stat[0]
     total_blocks = stat[2]
     free_blocks = stat[3]
@@ -117,8 +117,8 @@ def _file_size(filepath):
 def _is_ignored(path, ignore):
     """Return True if `path` matches any ignore entry."""
     for entry in ignore:
-        normalized = entry.rstrip('/')
-        if path == normalized or path.startswith(normalized + '/'):
+        normalized = entry.rstrip("/")
+        if path == normalized or path.startswith(normalized + "/"):
             return True
     return False
 
@@ -126,10 +126,10 @@ def _is_ignored(path, ignore):
 def _fmt_size(size_bytes):
     """Format bytes as a compact human-readable string."""
     if size_bytes < 1024:
-        return '%d B' % size_bytes
+        return "%d B" % size_bytes
     if size_bytes < 1024 * 1024:
-        return '%d KB' % (size_bytes // 1024)
-    return '%d.%d MB' % (
+        return "%d KB" % (size_bytes // 1024)
+    return "%d.%d MB" % (
         size_bytes // (1024 * 1024),
         (size_bytes % (1024 * 1024)) * 10 // (1024 * 1024),
     )
@@ -139,14 +139,15 @@ def storage_info():
     """Print and return the current filesystem storage statistics."""
     total, free, used = _get_storage_info()
     print(
-        'Storage: %s total, %s used, %s free (%d%% free)' % (
+        "Storage: %s total, %s used, %s free (%d%% free)"
+        % (
             _fmt_size(total),
             _fmt_size(used),
             _fmt_size(free),
             (free * 100) // total if total else 0,
         )
     )
-    return {'total': total, 'free': free, 'used': used}
+    return {"total": total, "free": free, "used": used}
 
 
 def _ensure_ignore(ignore):
@@ -163,7 +164,7 @@ def _ensure_ignore(ignore):
 def _ensure_config_dir():
     """Create the `/config` directory if it does not exist."""
     try:
-        os.mkdir('/config')
+        os.mkdir("/config")
     except Exception:
         pass
 
@@ -171,7 +172,7 @@ def _ensure_config_dir():
 def _load_config():
     """Load the OTA config JSON from the device."""
     try:
-        with open(_CONFIG_PATH, 'r') as file_handle:
+        with open(_CONFIG_PATH, "r") as file_handle:
             return json.loads(file_handle.read())
     except Exception:
         return {}
@@ -180,25 +181,25 @@ def _load_config():
 def load_config(path=_CONFIG_PATH):
     """Return the OTA config with defaults. OTA is off unless `enabled` is true."""
     try:
-        with open(path, 'r') as file_handle:
+        with open(path, "r") as file_handle:
             stored = json.loads(file_handle.read())
         if not isinstance(stored, dict):
             stored = {}
     except Exception:
         stored = {}
     return {
-        'user': stored.get('user', ''),
-        'repository': stored.get('repository', ''),
-        'token': stored.get('token', ''),
-        'ignore': stored.get('ignore', []),
-        'enabled': stored.get('enabled') is True,
+        "user": stored.get("user", ""),
+        "repository": stored.get("repository", ""),
+        "token": stored.get("token", ""),
+        "ignore": stored.get("ignore", []),
+        "enabled": stored.get("enabled") is True,
     }
 
 
 def _load_ota_state(state_path=_OTA_STATE_PATH):
     """Load the stored OTA state from disk."""
     try:
-        with open(state_path, 'r') as file_handle:
+        with open(state_path, "r") as file_handle:
             state = json.loads(file_handle.read())
             if isinstance(state, dict):
                 return state
@@ -211,10 +212,10 @@ def _save_ota_state(state, state_path=_OTA_STATE_PATH):
     """Persist OTA state to disk."""
     try:
         _ensure_config_dir()
-        with open(state_path, 'w') as file_handle:
+        with open(state_path, "w") as file_handle:
             file_handle.write(json.dumps(state))
     except Exception as error:
-        print('[OTA] Warning: failed to save OTA state: %s' % error)
+        print("[OTA] Warning: failed to save OTA state: %s" % error)
 
 
 def _since(now, state, key):
@@ -229,37 +230,38 @@ def due(now, state, at_boot, idle_ms, clock_ok):
     a failed one; then at boot, or once the box has been idle 10 min.
     """
     if not clock_ok:
-        print('[OTA] clock not set')
+        print("[OTA] clock not set")
         return False
-    if _since(now, state, 'last_success_epoch') < _OTA_INTERVAL_SECONDS:
+    if _since(now, state, "last_success_epoch") < _OTA_INTERVAL_SECONDS:
         return False
-    if _since(now, state, 'last_try_epoch') < _RETRY_AFTER_FAIL_S:
+    if _since(now, state, "last_try_epoch") < _RETRY_AFTER_FAIL_S:
         return False
     return at_boot or idle_ms >= IDLE_BEFORE_UPDATE_MS
 
 
-def run_if_due(cfg, at_boot, idle_ms=0, abort=None, now=None, run=None,
-               state_path=None):
+def run_if_due(
+    cfg, at_boot, idle_ms=0, abort=None, now=None, run=None, state_path=None
+):
     """run_update() when OTA is on, not in dev mode, and due().
 
     Returns 'off', 'dev mode', 'not due', or run_update()'s result. The
     try time is saved before the run (an install resets the box inside
     it); the success time after any result but 'failed: ...'.
     """
-    if cfg.get('enabled') is not True:
-        return 'off'
+    if cfg.get("enabled") is not True:
+        return "off"
     if recovery.dev_mode():
-        return 'dev mode'
+        return "dev mode"
     now = time.time() if now is None else now
     state_path = state_path or _OTA_STATE_PATH
     state = _load_ota_state(state_path)
     if not due(now, state, at_boot, idle_ms, now >= _MIN_VALID_EPOCH):
-        return 'not due'
-    state['last_try_epoch'] = now
+        return "not due"
+    state["last_try_epoch"] = now
     _save_ota_state(state, state_path)
     result = (run or run_update)(cfg, at_boot, abort=abort)
-    if not result.startswith('failed'):
-        state['last_success_epoch'] = now
+    if not result.startswith("failed"):
+        state["last_success_epoch"] = now
         _save_ota_state(state, state_path)
     return result
 
@@ -267,11 +269,11 @@ def run_if_due(cfg, at_boot, idle_ms=0, abort=None, now=None, run=None,
 def _reason(e):
     """Short text for a failure, for the result and the log."""
     if isinstance(e, HttpError):
-        msg = e.args[1] if len(e.args) > 1 else ''
-        return ('http %d %s' % (e.status, msg)).rstrip()
+        msg = e.args[1] if len(e.args) > 1 else ""
+        return ("http %d %s" % (e.status, msg)).rstrip()
     if isinstance(e, OtaError):
         return str(e)
-    return ('%s %s' % (type(e).__name__, e)).rstrip()
+    return ("%s %s" % (type(e).__name__, e)).rstrip()
 
 
 def _local_hashes(files):
@@ -279,7 +281,7 @@ def _local_hashes(files):
     an X.mpy in it would replace."""
     local = {}
     for path in [p for p, _, _ in files] + ota_target.shadowed_py(files):
-        sha = ota_stage.file_sha(recovery.LIVE_ROOT + '/' + path)
+        sha = ota_stage.file_sha(recovery.LIVE_ROOT + "/" + path)
         if sha:
             local[path] = sha
         recovery.feed()
@@ -287,20 +289,20 @@ def _local_hashes(files):
 
 
 def _update(cfg, abort, get_json, fetch):
-    if cfg.get('enabled') is not True:
-        return 'off'
+    if cfg.get("enabled") is not True:
+        return "off"
     state = recovery.load_state()
-    if state['trial']:
-        return 'failed: trial active'   # install() would refuse after the download
-    auth = {'Authorization': 'Bearer ' + cfg['token']} if cfg.get('token') else {}
-    session = https.Session()   # one kept connection for the API calls
+    if state["trial"]:
+        return "failed: trial active"  # install() would refuse after the download
+    auth = {"Authorization": "Bearer " + cfg["token"]} if cfg.get("token") else {}
+    session = https.Session()  # one kept connection for the API calls
 
     def api_get(path):
-        return session.get_json(_API + path, auth)   # parsed as it arrives
+        return session.get_json(_API + path, auth)  # parsed as it arrives
 
-    assets = _API + '/repos/%s/%s/releases/assets/' % (cfg['user'], cfg['repository'])
+    assets = _API + "/repos/%s/%s/releases/assets/" % (cfg["user"], cfg["repository"])
     asset_headers = dict(auth)
-    asset_headers['Accept'] = _ASSET_MEDIA
+    asset_headers["Accept"] = _ASSET_MEDIA
 
     def asset_get(asset, sink):
         return session.get(assets + str(asset), asset_headers, sink=sink)
@@ -313,40 +315,46 @@ def _update(cfg, abort, get_json, fetch):
 
 def _apply(cfg, abort, state, get_json, fetch):
     target = ota_target.resolve_target(cfg, get_json)
-    version = target['version']
-    if version in state['bad']:
-        return 'bad version'
-    if version == state['version']:
-        return 'up to date'
+    version = target["version"]
+    if version in state["bad"]:
+        return "bad version"
+    if version == state["version"]:
+        return "up to date"
 
     def plan_for(header):
         # The header names every file and its hash: plan from it before
         # the bodies arrive, so only changed files reach the stage folder.
-        if header['version'] != version:
-            raise OtaError('bundle %s, release %s' % (header['version'], version))
-        files = header['files']
-        return ota_target.build_plan(files, _local_hashes(files), state['managed'],
-                                     cfg.get('ignore', []))
+        if header["version"] != version:
+            raise OtaError("bundle %s, release %s" % (header["version"], version))
+        files = header["files"]
+        return ota_target.build_plan(
+            files, _local_hashes(files), state["managed"], cfg.get("ignore", [])
+        )
 
-    plan = ota_stage.stage_bundle(lambda sink: fetch(target['asset'], sink), plan_for, abort)
+    plan = ota_stage.stage_bundle(
+        lambda sink: fetch(target["asset"], sink), plan_for, abort
+    )
     # stage_bundle checks abort only as chunks arrive: a card tapped as the
     # last one came must stop the install and its reset too.
     if abort and abort():
-        raise OtaError('aborted')
-    if not plan['files'] and not plan['deletes']:
+        raise OtaError("aborted")
+    if not plan["files"] and not plan["deletes"]:
         # Same files (a release with no code change, or a box set up by
         # cable): adopt the version without a trial or a reset.
         recovery._rm_tree(recovery.STAGE_DIR)
-        state['version'] = version
-        state['managed'] = plan['managed']
+        state["version"] = version
+        state["managed"] = plan["managed"]
         recovery.save_state(state)
-        return 'up to date'
-    recovery.install(version, [p for p, _, _ in plan['files']], plan['deletes'],
-                     plan['managed'])
-    return 'installed ' + version
+        return "up to date"
+    recovery.install(
+        version, [p for p, _, _ in plan["files"]], plan["deletes"], plan["managed"]
+    )
+    return "installed " + version
 
 
-def run_update(cfg, at_boot, abort=None, get_json=None, fetch=None, reset=machine.reset):
+def run_update(
+    cfg, at_boot, abort=None, get_json=None, fetch=None, reset=machine.reset
+):
     """Update the box to the latest release. Never raises.
 
     Returns 'off', 'up to date', 'bad version', 'installed <tag>' or
@@ -362,19 +370,19 @@ def run_update(cfg, at_boot, abort=None, get_json=None, fetch=None, reset=machin
     try:
         result = _update(cfg, abort, get_json, fetch)
     except Exception as e:
-        result = 'failed: ' + _reason(e)
+        result = "failed: " + _reason(e)
         try:
             recovery._rm_tree(recovery.STAGE_DIR)
         except Exception:
             pass
     left_journal = not journal_before and recovery._exists(recovery.JOURNAL_PATH)
-    recovery.log('ota', '%s %s' % ('boot' if at_boot else 'idle', result))
-    if result.startswith('installed ') or left_journal:
+    recovery.log("ota", "%s %s" % ("boot" if at_boot else "idle", result))
+    if result.startswith("installed ") or left_journal:
         reset()
     return result
 
 
-def create_config(user='', repository='', token='', ignore=None, enabled=False):
+def create_config(user="", repository="", token="", ignore=None, enabled=False):
     """Write the OTA config file to `/config/ota_config.json`.
 
     The box follows the latest GitHub release of user/repository.
@@ -385,34 +393,34 @@ def create_config(user='', repository='', token='', ignore=None, enabled=False):
 
     _ensure_config_dir()
     config = {
-        'user': user,
-        'repository': repository,
-        'token': token,
-        'ignore': ignore,
-        'enabled': enabled,
+        "user": user,
+        "repository": repository,
+        "token": token,
+        "ignore": ignore,
+        "enabled": enabled,
     }
 
-    with open(_CONFIG_PATH, 'w') as file_handle:
+    with open(_CONFIG_PATH, "w") as file_handle:
         file_handle.write(json.dumps(config))
 
     field_names = [key for key in config if config[key]]
-    print('Config saved to %s' % _CONFIG_PATH)
-    print('Fields stored: %s' % ', '.join(field_names))
-    print('WARNING: OTA config can contain repository credentials. Keep it local.')
+    print("Config saved to %s" % _CONFIG_PATH)
+    print("Fields stored: %s" % ", ".join(field_names))
+    print("WARNING: OTA config can contain repository credentials. Keep it local.")
 
 
 def show_config():
     """Print the current OTA configuration with token masking."""
     config = _load_config()
     if not config:
-        print('No config found. Run ota.create_config() to set up.')
+        print("No config found. Run ota.create_config() to set up.")
         return
 
     for key, value in config.items():
-        if key == 'token' and value:
-            print('  %s: %s' % (key, value[:3] + '*' * max(len(value) - 3, 0)))
+        if key == "token" and value:
+            print("  %s: %s" % (key, value[:3] + "*" * max(len(value) - 3, 0)))
         else:
-            print('  %s: %s' % (key, value))
+            print("  %s: %s" % (key, value))
 
 
 def backup(ignore=None):
@@ -429,29 +437,32 @@ def backup(ignore=None):
 
     _, free, _ = _get_storage_info()
     if backup_size > free:
-        print('Not enough space for backup.')
-        print('  Need: %s, Free: %s' % (_fmt_size(backup_size), _fmt_size(free)))
+        print("Not enough space for backup.")
+        print("  Need: %s, Free: %s" % (_fmt_size(backup_size), _fmt_size(free)))
         return -1
 
-    with open('/ota.backup', 'w') as file_handle:
-        file_handle.write('ota backup v1\n')
+    with open("/ota.backup", "w") as file_handle:
+        file_handle.write("ota backup v1\n")
         for path, sha in local_tree.items():
             if _is_ignored(path, ignore):
                 continue
-            file_handle.write('FILE:%s SHA:%s\n' % (path, sha))
+            file_handle.write("FILE:%s SHA:%s\n" % (path, sha))
             try:
-                with open(path, 'rb') as data_file:
+                with open(path, "rb") as data_file:
                     content = data_file.read()
                 try:
-                    file_handle.write('---\n')
-                    file_handle.write(content.decode('utf-8'))
-                    file_handle.write('\n---\n')
+                    file_handle.write("---\n")
+                    file_handle.write(content.decode("utf-8"))
+                    file_handle.write("\n---\n")
                 except Exception:
-                    file_handle.write('---BINARY:%d---\n' % len(content))
+                    file_handle.write("---BINARY:%d---\n" % len(content))
             except Exception:
-                file_handle.write('---ERROR---\n')
+                file_handle.write("---ERROR---\n")
 
-    print('Backup saved to /ota.backup (%d files, ~%s)' % (file_count, _fmt_size(backup_size)))
+    print(
+        "Backup saved to /ota.backup (%d files, ~%s)"
+        % (file_count, _fmt_size(backup_size))
+    )
     return file_count
 
 
@@ -460,14 +471,14 @@ def restore(ignore=None):
     ignore = _ensure_ignore(ignore)
 
     try:
-        file_handle = open('/ota.backup', 'r')
+        file_handle = open("/ota.backup", "r")
     except Exception:
-        print('No backup file found at /ota.backup')
+        print("No backup file found at /ota.backup")
         return False
 
     header = file_handle.readline().strip()
-    if not header.startswith('ota backup'):
-        print('Invalid backup file format.')
+    if not header.startswith("ota backup"):
+        print("Invalid backup file format.")
         file_handle.close()
         return False
 
@@ -478,30 +489,30 @@ def restore(ignore=None):
     in_content = False
 
     for line in file_handle:
-        line_stripped = line.rstrip('\n')
+        line_stripped = line.rstrip("\n")
 
-        if line_stripped.startswith('FILE:'):
+        if line_stripped.startswith("FILE:"):
             if current_path and current_content is not None:
                 if not _is_ignored(current_path, ignore):
                     _restore_file(current_path, current_content)
                     restored += 1
                 else:
                     skipped += 1
-            current_path = line_stripped.split(' SHA:')[0][5:]
+            current_path = line_stripped.split(" SHA:")[0][5:]
             current_content = None
             in_content = False
-        elif line_stripped == '---' and not in_content:
+        elif line_stripped == "---" and not in_content:
             in_content = True
-            current_content = ''
-        elif line_stripped == '---' and in_content:
+            current_content = ""
+        elif line_stripped == "---" and in_content:
             in_content = False
-        elif line_stripped.startswith('---BINARY:') or line_stripped == '---ERROR---':
+        elif line_stripped.startswith("---BINARY:") or line_stripped == "---ERROR---":
             in_content = False
             current_content = None
-            print('  skip (binary/error): %s' % current_path)
+            print("  skip (binary/error): %s" % current_path)
         elif in_content:
             if current_content:
-                current_content += '\n' + line_stripped
+                current_content += "\n" + line_stripped
             else:
                 current_content = line_stripped
 
@@ -513,23 +524,21 @@ def restore(ignore=None):
             skipped += 1
 
     file_handle.close()
-    print('Restore complete: %d files restored, %d skipped' % (restored, skipped))
+    print("Restore complete: %d files restored, %d skipped" % (restored, skipped))
     return True
 
 
 def _restore_file(filepath, content):
     """Restore a single file and create parent directories as needed."""
-    parts = filepath.split('/')
+    parts = filepath.split("/")
     for index in range(1, len(parts)):
-        directory = '/'.join(parts[:index])
+        directory = "/".join(parts[:index])
         if directory:
             try:
                 os.mkdir(directory)
             except Exception:
                 pass
 
-    with open(filepath, 'w') as file_handle:
+    with open(filepath, "w") as file_handle:
         file_handle.write(content)
-    print('  restored:', filepath)
-
-
+    print("  restored:", filepath)

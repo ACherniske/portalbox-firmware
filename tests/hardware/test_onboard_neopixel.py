@@ -10,11 +10,7 @@ NUM_LEDS = 1
 DATA_PIN = 38
 
 # Create NeoPixel object
-pixel = neopixel_wrapper(
-    pin=DATA_PIN,
-    num_pixels=NUM_LEDS,
-    brightness=31
-)
+pixel = neopixel_wrapper(pin=DATA_PIN, num_pixels=NUM_LEDS, brightness=31)
 
 # Ensure LED starts off
 pixel.clear()
@@ -34,4 +30,3 @@ pixel.show()
 # Keep script alive
 while True:
     time.sleep(1)
-

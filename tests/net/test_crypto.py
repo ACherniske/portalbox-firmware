@@ -1,6 +1,7 @@
 from tests.test_helper import TestRunner
 import net.crypto as crypto
 
+
 def run_all():
     runner = TestRunner()
 
@@ -17,8 +18,8 @@ def run_all():
         assert original == decrypted, f"Expected {original}, got {decrypted}"
 
     def test_hex_check():
-        assert crypto._is_hex("abcdef0123") == True
-        assert crypto._is_hex("not-hex!") == False
+        assert crypto._is_hex("abcdef0123") is True
+        assert crypto._is_hex("not-hex!") is False
 
     # Execute via runner
     runner.run_test("Hashing Logic", test_hashing)
@@ -27,6 +28,7 @@ def run_all():
 
     # Show final LED result
     runner.final_report()
+
 
 if __name__ == "__main__":
     run_all()

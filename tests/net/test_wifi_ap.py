@@ -4,17 +4,27 @@ from net import clock
 from net.wifi import WifiManager
 from net.models import WiFiConfig
 
-CA_FILE = '/test_ap_ca.pem'
+CA_FILE = "/test_ap_ca.pem"
 
-STRONG = b'\x44\x12\x44\x6b\xae\x60'
-WEAK = b'\x48\xb4\xc3\xd8\x65\x60'
-OTHER = b'\x00\x11\x22\x33\x44\x55'
+STRONG = b"\x44\x12\x44\x6b\xae\x60"
+WEAK = b"\x48\xb4\xc3\xd8\x65\x60"
+OTHER = b"\x00\x11\x22\x33\x44\x55"
 
 # Keyword arguments the firmware's WLAN.connect() accepts
 # (h-milz fork e244d80, ports/esp32/network_wlan.c network_wlan_connect).
-CONNECT_KEYWORDS = ('bssid', 'eap_method', 'username', 'password', 'identity',
-                    'ca_cert', 'ttls_phase2_method', 'client_cert', 'private_key',
-                    'private_key_password', 'disable_time_check')
+CONNECT_KEYWORDS = (
+    "bssid",
+    "eap_method",
+    "username",
+    "password",
+    "identity",
+    "ca_cert",
+    "ttls_phase2_method",
+    "client_cert",
+    "private_key",
+    "private_key_password",
+    "disable_time_check",
+)
 
 
 def _ap(ssid, bssid, rssi):
@@ -45,7 +55,7 @@ class FakeNIC:
         # rest are these keywords. Anything else raises, as on the box.
         extra = [k for k in kw if k not in CONNECT_KEYWORDS]
         if extra or len(args) > 2:
-            raise TypeError('extra keyword arguments given')
+            raise TypeError("extra keyword arguments given")
         self.connect_args.append(args)
         self.connect_kw.append(kw)
         self.current = 1010
@@ -63,13 +73,13 @@ class FakeNIC:
         self.current = 1000
 
     def ifconfig(self):
-        return ('10.0.0.2', '255.255.255.0', '10.0.0.1', '10.0.0.1')
+        return ("10.0.0.2", "255.255.255.0", "10.0.0.1", "10.0.0.1")
 
 
 def _manager(scans, config=None):
     if config is None:
         config = WiFiConfig()
-        config.set_wpa2_psk('net', 'password123')
+        config.set_wpa2_psk("net", "password123")
     mgr = WifiManager(config=config, verbose=False)
     mgr.nic = FakeNIC(scans)
     mgr._sync_time = lambda: None
@@ -82,7 +92,7 @@ def _stop_autosave():
         clock._autosave_timer = None
 
 
-def _connect(mgr, password='password123'):
+def _connect(mgr, password="password123"):
     try:
         ok = mgr.connect(password, skip_init=True)
     finally:
@@ -95,92 +105,102 @@ def run():
     runner = TestRunner()
 
     def test_joins_strongest():
-        mgr = _manager([[
-            _ap(b'net', WEAK, -88),
-            _ap(b'other', OTHER, -40),   # stronger, but not our network
-            _ap(b'net', STRONG, -63),
-        ]])
+        mgr = _manager(
+            [
+                [
+                    _ap(b"net", WEAK, -88),
+                    _ap(b"other", OTHER, -40),  # stronger, but not our network
+                    _ap(b"net", STRONG, -63),
+                ]
+            ]
+        )
         kw = _connect(mgr)
-        assert kw.get('bssid') == STRONG, "bssid %r" % (kw.get('bssid'),)
+        assert kw.get("bssid") == STRONG, "bssid %r" % (kw.get("bssid"),)
 
     def test_no_match_no_bssid():
-        mgr = _manager([[_ap(b'other', OTHER, -40)]])
+        mgr = _manager([[_ap(b"other", OTHER, -40)]])
         kw = _connect(mgr)
-        assert 'bssid' not in kw, "bssid passed: %r" % (kw.get('bssid'),)
+        assert "bssid" not in kw, "bssid passed: %r" % (kw.get("bssid"),)
         assert mgr.nic.scan_calls == 1, "scan_calls %d" % mgr.nic.scan_calls
 
     def test_scan_error_no_bssid():
         mgr = _manager([OSError(-1)])
         kw = _connect(mgr)
-        assert 'bssid' not in kw, "bssid passed: %r" % (kw.get('bssid'),)
+        assert "bssid" not in kw, "bssid passed: %r" % (kw.get("bssid"),)
 
     def test_config_bssid_wins():
         config = WiFiConfig()
-        config.set_wpa2_psk('net', 'password123', bssid=WEAK)
-        mgr = _manager([[_ap(b'net', STRONG, -63)]], config)
+        config.set_wpa2_psk("net", "password123", bssid=WEAK)
+        mgr = _manager([[_ap(b"net", STRONG, -63)]], config)
         kw = _connect(mgr)
-        assert kw.get('bssid') == WEAK, "bssid %r" % (kw.get('bssid'),)
+        assert kw.get("bssid") == WEAK, "bssid %r" % (kw.get("bssid"),)
         assert mgr.nic.scan_calls == 0, "scanned %d times" % mgr.nic.scan_calls
 
     def test_rescans_each_attempt():
-        mgr = _manager([
-            [_ap(b'net', WEAK, -88), _ap(b'net', STRONG, -63)],
-            [_ap(b'net', WEAK, -60), _ap(b'net', STRONG, -80)],
-        ])
+        mgr = _manager(
+            [
+                [_ap(b"net", WEAK, -88), _ap(b"net", STRONG, -63)],
+                [_ap(b"net", WEAK, -60), _ap(b"net", STRONG, -80)],
+            ]
+        )
         first = _connect(mgr)
         mgr.nic.disconnect()
         second = _connect(mgr)
-        assert first.get('bssid') == STRONG, "first bssid %r" % (first.get('bssid'),)
-        assert second.get('bssid') == WEAK, "second bssid %r" % (second.get('bssid'),)
+        assert first.get("bssid") == STRONG, "first bssid %r" % (first.get("bssid"),)
+        assert second.get("bssid") == WEAK, "second bssid %r" % (second.get("bssid"),)
 
     def test_enterprise_joins_strongest():
-        with open(CA_FILE, 'w') as f:
-            f.write('-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n')
+        with open(CA_FILE, "w") as f:
+            f.write("-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n")
         try:
             config = WiFiConfig()
-            config.set_eap_peap('net', 'user', 'pw', ca_cert_file=CA_FILE)
-            mgr = _manager([[_ap(b'net', WEAK, -88), _ap(b'net', STRONG, -63)]], config)
-            kw = _connect(mgr, 'pw')
+            config.set_eap_peap("net", "user", "pw", ca_cert_file=CA_FILE)
+            mgr = _manager([[_ap(b"net", WEAK, -88), _ap(b"net", STRONG, -63)]], config)
+            kw = _connect(mgr, "pw")
             mgr._stop_and_release()
         finally:
             os.remove(CA_FILE)
-        assert kw.get('bssid') == STRONG, "bssid %r" % (kw.get('bssid'),)
+        assert kw.get("bssid") == STRONG, "bssid %r" % (kw.get("bssid"),)
 
     def test_psk_key_positional():
-        mgr = _manager([[_ap(b'net', STRONG, -63)]])
+        mgr = _manager([[_ap(b"net", STRONG, -63)]])
         _connect(mgr)
         args = mgr.nic.connect_args[-1]
-        assert args == ('net', 'password123'), "connect args %r" % (args,)
+        assert args == ("net", "password123"), "connect args %r" % (args,)
 
     def test_wpa3_psk_connects():
         config = WiFiConfig()
-        config.set_wpa3_psk('net', 'password123')
-        mgr = _manager([[_ap(b'net', STRONG, -63)]], config)
+        config.set_wpa3_psk("net", "password123")
+        mgr = _manager([[_ap(b"net", STRONG, -63)]], config)
         kw = _connect(mgr)
         args = mgr.nic.connect_args[-1]
-        assert args == ('net', 'password123'), "connect args %r" % (args,)
-        assert kw.get('bssid') == STRONG, "bssid %r" % (kw.get('bssid'),)
+        assert args == ("net", "password123"), "connect args %r" % (args,)
+        assert kw.get("bssid") == STRONG, "bssid %r" % (kw.get("bssid"),)
 
     def test_wpa3_setting_warned():
         # The firmware has no WPA3 switch: say so instead of claiming WPA3.
         config = WiFiConfig()
-        config.set_wpa3_psk('net', 'password123')
-        mgr = _manager([[_ap(b'net', STRONG, -63)]], config)
+        config.set_wpa3_psk("net", "password123")
+        mgr = _manager([[_ap(b"net", STRONG, -63)]], config)
         logs = []
         mgr._log = logs.append
         _connect(mgr)
-        assert any('WARNING' in m and 'wpa3' in m for m in logs), "no warning: %r" % (logs,)
-        assert not any('WPA3-PSK' in m for m in logs), "claims WPA3: %r" % (logs,)
+        assert any("WARNING" in m and "wpa3" in m for m in logs), "no warning: %r" % (
+            logs,
+        )
+        assert not any("WPA3-PSK" in m for m in logs), "claims WPA3: %r" % (logs,)
 
     def test_wpa2_no_wpa3_warning():
-        mgr = _manager([[_ap(b'net', STRONG, -63)]])
+        mgr = _manager([[_ap(b"net", STRONG, -63)]])
         logs = []
         mgr._log = logs.append
         _connect(mgr)
-        assert not any('wpa3' in m.lower() for m in logs), "wpa3 logged: %r" % (logs,)
+        assert not any("wpa3" in m.lower() for m in logs), "wpa3 logged: %r" % (logs,)
 
     runner.run_test("WPA2-PSK passes the key positionally", test_psk_key_positional)
-    runner.run_test("WPA3-PSK connects with the firmware's arguments", test_wpa3_psk_connects)
+    runner.run_test(
+        "WPA3-PSK connects with the firmware's arguments", test_wpa3_psk_connects
+    )
     runner.run_test("wpa3 in the config: warned, not claimed", test_wpa3_setting_warned)
     runner.run_test("WPA2-PSK: no wpa3 warning", test_wpa2_no_wpa3_warning)
     runner.run_test("Joins the strongest AP of the network", test_joins_strongest)
@@ -188,7 +208,9 @@ def run():
     runner.run_test("Scan error connects without bssid", test_scan_error_no_bssid)
     runner.run_test("Config bssid wins, no scan", test_config_bssid_wins)
     runner.run_test("Each attempt scans again", test_rescans_each_attempt)
-    runner.run_test("Enterprise login joins the strongest AP", test_enterprise_joins_strongest)
+    runner.run_test(
+        "Enterprise login joins the strongest AP", test_enterprise_joins_strongest
+    )
 
     runner.final_report()
 

@@ -3,11 +3,7 @@
 
 import uasyncio as asyncio
 
-from core.fsm import (
-    DeviceFSM,
-    States,
-    STATE_NAMES
-)
+from core.fsm import DeviceFSM, States, STATE_NAMES
 
 from core.device import cleanup_device
 
@@ -15,11 +11,7 @@ from core.device import cleanup_device
 STATE_DURATION = 5
 
 
-async def hold_state(
-    fsm,
-    state,
-    duration = STATE_DURATION
-):
+async def hold_state(fsm, state, duration=STATE_DURATION):
     """
     Transition to a state and hold it.
 
@@ -36,11 +28,8 @@ async def hold_state(
     fsm._set_state(state)
 
     for second in range(duration):
-
         print(
-            f"[TEST] Active State: "
-            f"{STATE_NAMES[fsm.state]} "
-            f"({second + 1}/{duration}s)"
+            f"[TEST] Active State: {STATE_NAMES[fsm.state]} ({second + 1}/{duration}s)"
         )
 
         await asyncio.sleep(1)
@@ -64,64 +53,43 @@ async def main():
     # IDLE
     # =========================================================
 
-    await hold_state(
-        fsm,
-        States.IDLE
-    )
+    await hold_state(fsm, States.IDLE)
 
     # =========================================================
     # AUTH
     # =========================================================
 
-    await hold_state(
-        fsm,
-        States.AUTH
-    )
+    await hold_state(fsm, States.AUTH)
 
     # =========================================================
     # NOAUTH
     # =========================================================
 
-    await hold_state(
-        fsm,
-        States.NOAUTH
-    )
+    await hold_state(fsm, States.NOAUTH)
 
     # =========================================================
     # GRACE
     # =========================================================
 
-    await hold_state(
-        fsm,
-        States.GRACE
-    )
+    await hold_state(fsm, States.GRACE)
 
     # =========================================================
     # PROXY
     # =========================================================
 
-    await hold_state(
-        fsm,
-        States.PROXY
-    )
+    await hold_state(fsm, States.PROXY)
 
     # =========================================================
     # TRAINING
     # =========================================================
 
-    await hold_state(
-        fsm,
-        States.TRAINING
-    )
+    await hold_state(fsm, States.TRAINING)
 
     # =========================================================
     # TIMEOUT
     # =========================================================
 
-    await hold_state(
-        fsm,
-        States.TIMEOUT
-    )
+    await hold_state(fsm, States.TIMEOUT)
 
     # =========================================================
     # Return to IDLE
@@ -131,9 +99,7 @@ async def main():
     print("[TEST] Returning to IDLE")
     print("================================================")
 
-    fsm._set_state(
-        States.IDLE
-    )
+    fsm._set_state(States.IDLE)
 
     await asyncio.sleep(3)
 
@@ -159,11 +125,9 @@ async def main():
 # ============================================================================
 
 try:
-
     asyncio.run(main())
 
 except KeyboardInterrupt:
-
     print("\n[TEST] Interrupted by user")
 
     cleanup_device()

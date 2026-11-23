@@ -11,9 +11,9 @@ from net import ota
 
 # State and the dev flag are moved under ROOT so the suite never touches
 # the box's real files.
-ROOT = '/t_sched'
-STATE = ROOT + '/ota_state.json'
-DEV_FLAG = ROOT + '/dev_mode'
+ROOT = "/t_sched"
+STATE = ROOT + "/ota_state.json"
+DEV_FLAG = ROOT + "/dev_mode"
 
 DAY = 24 * 3600
 HOUR = 3600
@@ -24,7 +24,7 @@ def _at(year, month, day, hour=12):
 
 
 NOW = _at(2026, 11, 6)
-OLD = NOW - 30 * DAY   # last check long ago
+OLD = NOW - 30 * DAY  # last check long ago
 
 
 def _rm_tree(path):
@@ -34,7 +34,7 @@ def _rm_tree(path):
         return
     if is_dir:
         for name in os.listdir(path):
-            _rm_tree(path + '/' + name)
+            _rm_tree(path + "/" + name)
         os.rmdir(path)
     else:
         os.remove(path)
@@ -85,7 +85,7 @@ class _FakeTicks:
 class _Run:
     """A fake run_update: records each call and returns `result`."""
 
-    def __init__(self, result='up to date', during=None):
+    def __init__(self, result="up to date", during=None):
         self.result = result
         self.during = during
         self.calls = []
@@ -97,7 +97,7 @@ class _Run:
         return self.result
 
 
-ON = {'enabled': True}
+ON = {"enabled": True}
 
 
 def run():
@@ -108,22 +108,30 @@ def run():
         def wrapped():
             _rm_tree(ROOT)
             _mkdir(ROOT)
-            patch.set(recovery, 'DEV_FLAG_PATH', DEV_FLAG)
+            patch.set(recovery, "DEV_FLAG_PATH", DEV_FLAG)
             try:
                 test()
             finally:
                 patch.undo()
                 _rm_tree(ROOT)
+
         return wrapped
 
     def check(cfg=ON, at_boot=True, idle_ms=0, abort=None, now=NOW, fake=None):
-        return ota.run_if_due(cfg, at_boot, idle_ms=idle_ms, abort=abort, now=now,
-                              run=fake, state_path=STATE)
+        return ota.run_if_due(
+            cfg,
+            at_boot,
+            idle_ms=idle_ms,
+            abort=abort,
+            now=now,
+            run=fake,
+            state_path=STATE,
+        )
 
     # --- DeviceFSM.idle_ms() -------------------------------------------------
 
     def fsm():
-        patch.set(fsm_mod, 'get_device', lambda: _Anything())
+        patch.set(fsm_mod, "get_device", lambda: _Anything())
         machine_ = fsm_mod.DeviceFSM()
         machine_._apply_state = lambda: None
         return machine_
@@ -145,7 +153,7 @@ def run():
         # ticks_diff only reaches +-2**29 ms (~6.2 days): step a fake clock
         # an hour at a time through 7 days in IDLE.
         clock = [0]
-        patch.set(fsm_mod, 'time', _FakeTicks(clock))
+        patch.set(fsm_mod, "time", _FakeTicks(clock))
         m = fsm()
         m.state = fsm_mod.States.IDLE
         m.state_start_time = clock[0]
@@ -163,7 +171,9 @@ def run():
         assert ota.due(NOW, {}, False, 599999, True) is False, "due at 599999 ms idle"
 
     def test_due_10_min():
-        assert ota.IDLE_BEFORE_UPDATE_MS == 600000, "IDLE_BEFORE_UPDATE_MS %r" % ota.IDLE_BEFORE_UPDATE_MS
+        assert ota.IDLE_BEFORE_UPDATE_MS == 600000, (
+            "IDLE_BEFORE_UPDATE_MS %r" % ota.IDLE_BEFORE_UPDATE_MS
+        )
         assert ota.due(NOW, {}, False, 600000, True) is True, "not due at 10 min idle"
 
     def test_clock_not_set():
@@ -171,74 +181,90 @@ def run():
         assert ota.due(NOW, {}, True, 0, False) is False, "ran with clock not set"
 
     def test_not_within_day():
-        state = {'last_success_epoch': NOW - DAY + 60, 'last_try_epoch': NOW - DAY + 60}
-        assert ota.due(NOW, state, True, 0, True) is False, "ran again 1 min short of a day"
-        state = {'last_success_epoch': NOW - DAY, 'last_try_epoch': NOW - DAY}
-        assert ota.due(NOW, state, True, 0, True) is True, "skipped a day after the last run"
+        state = {"last_success_epoch": NOW - DAY + 60, "last_try_epoch": NOW - DAY + 60}
+        assert ota.due(NOW, state, True, 0, True) is False, (
+            "ran again 1 min short of a day"
+        )
+        state = {"last_success_epoch": NOW - DAY, "last_try_epoch": NOW - DAY}
+        assert ota.due(NOW, state, True, 0, True) is True, (
+            "skipped a day after the last run"
+        )
 
     def test_retry_after_hour():
-        state = {'last_success_epoch': OLD, 'last_try_epoch': NOW - HOUR + 60}
-        assert ota.due(NOW, state, True, 0, True) is False, "retried 59 min after a failure"
-        state['last_try_epoch'] = NOW - HOUR
-        assert ota.due(NOW, state, True, 0, True) is True, "no retry an hour after a failure"
+        state = {"last_success_epoch": OLD, "last_try_epoch": NOW - HOUR + 60}
+        assert ota.due(NOW, state, True, 0, True) is False, (
+            "retried 59 min after a failure"
+        )
+        state["last_try_epoch"] = NOW - HOUR
+        assert ota.due(NOW, state, True, 0, True) is True, (
+            "no retry an hour after a failure"
+        )
 
     def test_bad_times_due():
         # A damaged state file must not block updates forever.
-        state = {'last_success_epoch': 'x', 'last_try_epoch': None}
-        assert ota.due(NOW, state, True, 0, True) is True, "bad stored times blocked the check"
+        state = {"last_success_epoch": "x", "last_try_epoch": None}
+        assert ota.due(NOW, state, True, 0, True) is True, (
+            "bad stored times blocked the check"
+        )
 
     # --- ota.run_if_due() ----------------------------------------------------
 
     def test_try_saved_before_run():
         seen = []
-        fake = _Run(during=lambda: seen.append(ota._load_ota_state(STATE).get('last_try_epoch')))
+        fake = _Run(
+            during=lambda: seen.append(ota._load_ota_state(STATE).get("last_try_epoch"))
+        )
         check(fake=fake)
         assert seen == [NOW], "try time during the run %r, want %d" % (seen, NOW)
 
     def test_ok_saves_success():
-        for result in ('up to date', 'bad version', 'installed abc'):
+        for result in ("up to date", "bad version", "installed abc"):
             _rm_tree(STATE)
             check(fake=_Run(result))
-            got = ota._load_ota_state(STATE).get('last_success_epoch')
+            got = ota._load_ota_state(STATE).get("last_success_epoch")
             assert got == NOW, "%r: success time %r" % (result, got)
 
     def test_failed_no_success():
-        check(fake=_Run('failed: http 504'))
+        check(fake=_Run("failed: http 504"))
         state = ota._load_ota_state(STATE)
-        assert 'last_success_epoch' not in state, "failure saved %r" % (state,)
-        assert state.get('last_try_epoch') == NOW, "try time %r" % (state,)
+        assert "last_success_epoch" not in state, "failure saved %r" % (state,)
+        assert state.get("last_try_epoch") == NOW, "try time %r" % (state,)
 
     def test_failed_retries_after_hour():
-        check(fake=_Run('failed: http 504'))
+        check(fake=_Run("failed: http 504"))
         fake = _Run()
-        assert check(now=NOW + HOUR - 60, fake=fake) == 'not due', "retried within the hour"
+        assert check(now=NOW + HOUR - 60, fake=fake) == "not due", (
+            "retried within the hour"
+        )
         check(now=NOW + HOUR, fake=fake)
-        assert len(fake.calls) == 1, "calls %r, want one retry after an hour" % (fake.calls,)
+        assert len(fake.calls) == 1, "calls %r, want one retry after an hour" % (
+            fake.calls,
+        )
 
     def test_off_never_runs():
         fake = _Run()
-        for enabled in (False, None, 'true'):
-            got = check(cfg={'enabled': enabled}, fake=fake)
-            assert got == 'off', "enabled=%r: result %r" % (enabled, got)
+        for enabled in (False, None, "true"):
+            got = check(cfg={"enabled": enabled}, fake=fake)
+            assert got == "off", "enabled=%r: result %r" % (enabled, got)
         assert fake.calls == [], "ran when off"
         assert ota._load_ota_state(STATE) == {}, "saved state when off"
 
     def test_dev_mode_idle():
-        with open(DEV_FLAG, 'w') as f:
-            f.write('')
+        with open(DEV_FLAG, "w") as f:
+            f.write("")
         fake = _Run()
         got = check(at_boot=False, idle_ms=700000, fake=fake)
-        assert got == 'dev mode', "result %r" % got
+        assert got == "dev mode", "result %r" % got
         assert fake.calls == [], "idle check ran in dev mode"
 
     def test_dev_mode_boot():
         # The boot path, through system._run_ota, with the flag file present.
-        with open(DEV_FLAG, 'w') as f:
-            f.write('')
+        with open(DEV_FLAG, "w") as f:
+            f.write("")
         fake = _Run()
-        patch.set(ota, 'load_config', lambda: ON)
-        patch.set(ota, 'run_update', fake)
-        patch.set(ota, '_OTA_STATE_PATH', STATE)
+        patch.set(ota, "load_config", lambda: ON)
+        patch.set(ota, "run_update", fake)
+        patch.set(ota, "_OTA_STATE_PATH", STATE)
         system._run_ota()
         assert fake.calls == [], "boot check ran in dev mode"
 
@@ -246,11 +272,15 @@ def run():
         # Before the 2023 floor but years after the board's 2000 epoch, so
         # the day and hour waits are long over and only the clock says no.
         fake = _Run()
-        assert check(now=_at(2023, 1, 1), fake=fake) == 'not due', "ran with a 2023 clock"
+        assert check(now=_at(2023, 1, 1), fake=fake) == "not due", (
+            "ran with a 2023 clock"
+        )
         assert fake.calls == [], "ran with a 2023 clock"
 
     def test_passes_abort():
-        stop = lambda: False
+        def stop():
+            return False
+
         fake = _Run()
         check(at_boot=False, idle_ms=600000, abort=stop, fake=fake)
         assert fake.calls == [(False, stop)], "calls %r" % (fake.calls,)
@@ -258,9 +288,12 @@ def run():
     def test_boot_uses_schedule():
         # system._run_ota goes through run_if_due with at_boot=True.
         calls = []
-        patch.set(ota, 'load_config', lambda: ON)
-        patch.set(ota, 'run_if_due',
-                  lambda cfg, at_boot, **k: calls.append((cfg, at_boot)) or 'not due')
+        patch.set(ota, "load_config", lambda: ON)
+        patch.set(
+            ota,
+            "run_if_due",
+            lambda cfg, at_boot, **k: calls.append((cfg, at_boot)) or "not due",
+        )
         system._run_ota()
         assert calls == [(ON, True)], "calls %r" % (calls,)
 
@@ -274,10 +307,14 @@ def run():
                 return 600000
 
         device = _Anything()
-        patch.set(ota, 'load_config', lambda: ON)
-        patch.set(ota, 'run_if_due',
-                  lambda cfg, at_boot, idle_ms=0, abort=None: calls.append(
-                      (cfg, at_boot, idle_ms, abort)) or 'not due')
+        patch.set(ota, "load_config", lambda: ON)
+        patch.set(
+            ota,
+            "run_if_due",
+            lambda cfg, at_boot, idle_ms=0, abort=None: (
+                calls.append((cfg, at_boot, idle_ms, abort)) or "not due"
+            ),
+        )
         app = app_main.Application()
         app.fsm = FakeFSM()
         app.device = device
@@ -315,10 +352,10 @@ def run():
         async def fake_loop(self, every_ms=0):
             started.append(1)
 
-        patch.set(app_main, 'get_device', lambda: _Anything())
-        patch.set(app_main, 'DeviceFSM', FakeFSM)
-        patch.set(app_main, 'cleanup_device', lambda: None)
-        patch.set(app_main.Application, '_ota_loop', fake_loop)
+        patch.set(app_main, "get_device", lambda: _Anything())
+        patch.set(app_main, "DeviceFSM", FakeFSM)
+        patch.set(app_main, "cleanup_device", lambda: None)
+        patch.set(app_main.Application, "_ota_loop", fake_loop)
         asyncio.run(app_main.Application().run())
         assert started == [1], "update loop started %d times, want 1" % len(started)
 

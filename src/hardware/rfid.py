@@ -1,7 +1,6 @@
 # hardware/rfid.py
 # Interface for MFRC522 RFID reader with debouncing and card management
 
-from machine import Pin
 from hardware.lib.mfrc522 import MFRC522
 import time
 
@@ -19,11 +18,7 @@ class RFIDReader:
             rst_pin: Reset pin number or Pin object
             debounce_ms: Debounce time in milliseconds (default 1000)
         """
-        self.reader = MFRC522(
-            spi=spi,
-            cs_pin=cs_pin,
-            rst_pin=rst_pin
-        )
+        self.reader = MFRC522(spi=spi, cs_pin=cs_pin, rst_pin=rst_pin)
 
         self.last_uid = None
         self.last_read_time = 0
@@ -73,18 +68,19 @@ class RFIDReader:
         """
         try:
             for attempt in range(self.read_retries):
-
                 (status, uid) = self.detect_card()
 
                 if status == self.reader.OK and uid is not None:
                     # Convert UID to hex string
-                    uid_str = ''.join([f'{b:02X}' for b in uid])
+                    uid_str = "".join([f"{b:02X}" for b in uid])
 
                     # Debounce check
                     current_time = time.ticks_ms()
-                    if (uid_str == self.last_uid and
-                        time.ticks_diff(current_time, self.last_read_time) <
-                            self.debounce_ms):
+                    if (
+                        uid_str == self.last_uid
+                        and time.ticks_diff(current_time, self.last_read_time)
+                        < self.debounce_ms
+                    ):
                         return None
 
                     self.last_uid = uid_str
@@ -147,12 +143,7 @@ class RFIDReader:
             return self.reader.ERROR, None
 
         # Authenticate
-        status = self.reader.auth(
-            self.reader.PICC_AUTHENT1A,
-            block_addr,
-            key,
-            uid
-        )
+        status = self.reader.auth(self.reader.PICC_AUTHENT1A, block_addr, key, uid)
         if status != self.reader.OK:
             return self.reader.ERROR, None
 
@@ -186,12 +177,7 @@ class RFIDReader:
             return self.reader.ERROR
 
         # Authenticate
-        status = self.reader.auth(
-            self.reader.PICC_AUTHENT1A,
-            block_addr,
-            key,
-            uid
-        )
+        status = self.reader.auth(self.reader.PICC_AUTHENT1A, block_addr, key, uid)
         if status != self.reader.OK:
             return self.reader.ERROR
 

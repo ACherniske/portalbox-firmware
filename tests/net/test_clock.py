@@ -19,12 +19,12 @@ def _remove_saved():
 
 # The suite saves and deletes times freely, so it must not touch the board's
 # real saved time: a stray future value there would set the next boot's floor.
-TEST_SAVED_FILE = '/config/test_last_time.txt'
+TEST_SAVED_FILE = "/config/test_last_time.txt"
 
 
 def _read(path):
     try:
-        with open(path, 'r') as f:
+        with open(path, "r") as f:
             return f.read()
     except OSError:
         return None
@@ -40,7 +40,7 @@ def run():
     t0 = time.ticks_ms()
 
     try:
-        os.mkdir('/config')
+        os.mkdir("/config")
     except OSError:
         pass
 
@@ -79,10 +79,12 @@ def run():
 
     def test_bad_file_falls_back():
         for content in ("garbage", ""):
-            with open(clock.SAVED_TIME_FILE, 'w') as f:
+            with open(clock.SAVED_TIME_FILE, "w") as f:
                 f.write(content)
             assert clock.load_saved() is None, "load_saved accepted %r" % content
-            assert clock.floor_seconds() == _floor_constant(), "floor ignored CLOCK_FLOOR for %r" % content
+            assert clock.floor_seconds() == _floor_constant(), (
+                "floor ignored CLOCK_FLOOR for %r" % content
+            )
         _remove_saved()
 
     def test_autosave_idempotent():
@@ -102,36 +104,48 @@ def run():
         class FakeNIC:
             def active(self, *a):
                 return True
+
             def connect(self, ssid, key=None, **kw):
                 pass
+
             def status(self, *a):
                 return 1010
+
             def isconnected(self):
                 return True
+
             def ifconfig(self):
-                return ('10.0.0.2', '255.255.255.0', '10.0.0.1', '10.0.0.1')
+                return ("10.0.0.2", "255.255.255.0", "10.0.0.1", "10.0.0.1")
 
         _remove_saved()
         _set_rtc(2000, 1, 1)
         config = WiFiConfig()
-        config.set_wpa2_psk('test-net', 'password123')
+        config.set_wpa2_psk("test-net", "password123")
         mgr = WifiManager(config=config, verbose=False)
         mgr.nic = FakeNIC()
-        mgr._sync_time = lambda: None   # no real network for NTP
-        assert mgr.connect('password123', skip_init=True) is True, "fake connect failed"
-        assert time.time() >= clock.floor_seconds(), "connect() did not apply the clock floor"
+        mgr._sync_time = lambda: None  # no real network for NTP
+        assert mgr.connect("password123", skip_init=True) is True, "fake connect failed"
+        assert time.time() >= clock.floor_seconds(), (
+            "connect() did not apply the clock floor"
+        )
         assert clock._autosave_timer is not None, "connect() did not start the autosave"
 
-    runner.run_test("Floor moves a 2000-era clock forward", test_floor_moves_old_clock_forward)
+    runner.run_test(
+        "Floor moves a 2000-era clock forward", test_floor_moves_old_clock_forward
+    )
     runner.run_test("Floor leaves a later clock alone", test_floor_leaves_later_clock)
     runner.run_test("Saved time round-trip", test_saved_time_round_trip)
     runner.run_test("Saved time raises the floor", test_saved_time_raises_floor)
-    runner.run_test("Bad saved-time file falls back to CLOCK_FLOOR", test_bad_file_falls_back)
+    runner.run_test(
+        "Bad saved-time file falls back to CLOCK_FLOOR", test_bad_file_falls_back
+    )
     runner.run_test("Autosave start is idempotent and saves", test_autosave_idempotent)
     if clock._autosave_timer is not None:
         clock._autosave_timer.deinit()
         clock._autosave_timer = None
-    runner.run_test("connect() applies the floor and starts autosave", test_connect_applies_floor)
+    runner.run_test(
+        "connect() applies the floor and starts autosave", test_connect_applies_floor
+    )
 
     # Leave the board as we found it: real time back, no timer, no test file.
     if clock._autosave_timer is not None:
@@ -143,7 +157,10 @@ def run():
     def test_real_saved_time_untouched():
         assert clock.SAVED_TIME_FILE == real_saved_file, "SAVED_TIME_FILE not restored"
         after = _read(real_saved_file)
-        assert after == real_saved, "real saved time changed: %r -> %r" % (real_saved, after)
+        assert after == real_saved, "real saved time changed: %r -> %r" % (
+            real_saved,
+            after,
+        )
 
     runner.run_test("Board's real saved time untouched", test_real_saved_time_untouched)
     tm = time.gmtime(saved_rtc + time.ticks_diff(time.ticks_ms(), t0) // 1000)

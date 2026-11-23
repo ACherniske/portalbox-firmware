@@ -2,12 +2,13 @@ from tests.test_helper import TestRunner
 import hardware.rfid as rfid_mod
 from hardware.rfid import RFIDReader
 
-UID5 = [0x23, 0xBE, 0x96, 0x03, 0x00]   # anticoll: 4 UID bytes + check byte
+UID5 = [0x23, 0xBE, 0x96, 0x03, 0x00]  # anticoll: 4 UID bytes + check byte
 
 
 class FakeReader:
     """MFRC522 stand-in: select_card() returns `select` (the card's SAK byte,
     or ERROR when the select fails)."""
+
     OK = 0
     ERROR = 1
     PICC_REQ_IDL = 0x26
@@ -65,7 +66,9 @@ def run():
     runner.run_test("MIFARE Classic (SAK 0x08) reads", test_mifare_classic_reads)
     runner.run_test("SAK 0x00 card reads", test_sak_zero_reads)
     runner.run_test("Failed select is rejected", test_failed_select_rejected)
-    runner.run_test("7-byte card keeps the level-1 ID", test_seven_byte_card_keeps_level_1_id)
+    runner.run_test(
+        "7-byte card keeps the level-1 ID", test_seven_byte_card_keeps_level_1_id
+    )
 
     runner.final_report()
 

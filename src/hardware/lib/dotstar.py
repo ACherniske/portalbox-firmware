@@ -8,6 +8,7 @@ _START_FRAME = const(0x00)
 _END_FRAME = const(0xFF)
 _LED_START = const(0xE0)  # First 3 bits set to 1 (APA102 requirement)
 
+
 class DotStar:
     """Low-level driver for DotStar (APA102) LED strips.
 
@@ -19,6 +20,7 @@ class DotStar:
     Colors are stored as RGB tuples in the public API; internally
     they are encoded BGR in the transmission buffer.
     """
+
     def __init__(self, spi, num_leds=10, brightness=31):
         """
         Initialize Dotstar driver.

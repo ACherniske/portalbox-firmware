@@ -10,18 +10,21 @@ def _online():
     """Connect WiFi and set the clock the way core/system.py does."""
     import network
     import time
+
     sta = network.WLAN(network.STA_IF)
     if sta.isconnected() and time.localtime()[0] >= 2025:
         return
     from net.models import WiFiConfig
     from net.wifi import WifiManager
+
     config = WiFiConfig()
     if not config.load():
-        raise Exception('no /config/wifi_config.json')
+        raise Exception("no /config/wifi_config.json")
     password = config.get_decrypted_password()
     if not WifiManager(config=config, verbose=False).connect_with_retry(password):
-        raise Exception('WiFi did not connect')
+        raise Exception("WiFi did not connect")
     from net import clock
+
     if clock._autosave_timer is not None:
         clock._autosave_timer.deinit()
         clock._autosave_timer = None
@@ -36,4 +39,4 @@ def join_first():
     try:
         _online()
     except Exception as e:
-        print('[TEST] WiFi join before the tests failed: %r' % (e,))
+        print("[TEST] WiFi join before the tests failed: %r" % (e,))

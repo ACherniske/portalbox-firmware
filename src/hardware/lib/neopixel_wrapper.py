@@ -36,9 +36,8 @@ class neopixel_wrapper:
         self.np = neopixel.NeoPixel(self.pin, num_pixels)
 
         # Use internal NeoPixel buffer if available
-        self._has_buf = hasattr(self.np, 'buf') and isinstance(
-            self.np.buf,
-            (bytearray, memoryview)
+        self._has_buf = hasattr(self.np, "buf") and isinstance(
+            self.np.buf, (bytearray, memoryview)
         )
 
         if self._has_buf:
@@ -126,11 +125,7 @@ class neopixel_wrapper:
         """Get logical RGB pixel value."""
         if 0 <= index < self.num_pixels:
             base = index * 3
-            return (
-                self._pixels[base],
-                self._pixels[base + 1],
-                self._pixels[base + 2]
-            )
+            return (self._pixels[base], self._pixels[base + 1], self._pixels[base + 2])
         return None
 
     def fill(self, r, g, b):

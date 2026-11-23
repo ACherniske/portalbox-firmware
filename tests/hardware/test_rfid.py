@@ -19,24 +19,14 @@ import time
 # =========================================================
 
 spi = SPI(
-    1,
-    baudrate=1000000,
-    polarity=0,
-    phase=0,
-    sck=Pin(38),
-    mosi=Pin(37),
-    miso=Pin(36)
+    1, baudrate=1000000, polarity=0, phase=0, sck=Pin(38), mosi=Pin(37), miso=Pin(36)
 )
 
 # =========================================================
 # RFID Reader Setup
 # =========================================================
 
-rfid = RFIDReader(
-    spi=spi,
-    cs_pin=2,
-    rst_pin=21
-)
+rfid = RFIDReader(spi=spi, cs_pin=2, rst_pin=21)
 
 # Verify initialization
 if not rfid.is_initialized:

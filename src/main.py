@@ -11,8 +11,8 @@ import sys
 import time
 import machine
 
-SAFE_MODE_PIN = 0          # BOOT button on many ESP32 boards
-SAFE_MODE_HOLD_MS = 3000   # Hold duration to enter safe mode
+SAFE_MODE_PIN = 0  # BOOT button on many ESP32 boards
+SAFE_MODE_HOLD_MS = 3000  # Hold duration to enter safe mode
 
 
 def _safe_mode_requested():
@@ -25,11 +25,7 @@ def _safe_mode_requested():
 
     try:
         # BOOT button is active-low.
-        boot_pin = machine.Pin(
-            SAFE_MODE_PIN,
-            machine.Pin.IN,
-            machine.Pin.PULL_UP
-        )
+        boot_pin = machine.Pin(SAFE_MODE_PIN, machine.Pin.IN, machine.Pin.PULL_UP)
 
         # Box button is inverted (active-high for safe boot). Its pin comes
         # from config/pins.py, a per-box file that OTA never changes.
@@ -37,12 +33,9 @@ def _safe_mode_requested():
 
         try:
             from config.pins import BUTTON_PIN
+
             if BUTTON_PIN != SAFE_MODE_PIN:
-                box_pin = machine.Pin(
-                    BUTTON_PIN,
-                    machine.Pin.IN,
-                    machine.Pin.PULL_UP
-                )
+                box_pin = machine.Pin(BUTTON_PIN, machine.Pin.IN, machine.Pin.PULL_UP)
         except Exception:
             # If config/pins isn't available, fall back to BOOT pin only.
             pass
@@ -102,8 +95,13 @@ def _safe_mode():
 
 def _cause_name(cause):
     """machine.reset_cause() as a name, e.g. WDT_RESET."""
-    for name in ('PWRON_RESET', 'HARD_RESET', 'WDT_RESET',
-                 'DEEPSLEEP_RESET', 'SOFT_RESET'):
+    for name in (
+        "PWRON_RESET",
+        "HARD_RESET",
+        "WDT_RESET",
+        "DEEPSLEEP_RESET",
+        "SOFT_RESET",
+    ):
         if getattr(machine, name, None) == cause:
             return name
     return str(cause)
@@ -119,8 +117,11 @@ def _log_crash(recovery, error):
         trace = buf.getvalue()
         print("\n[BOOT] crash %s: %s" % (type(error).__name__, error))
         print(trace)
-        recovery.log('crash', '%s: %s | %s' % (
-            type(error).__name__, error, trace.strip().replace('\n', ' | ')))
+        recovery.log(
+            "crash",
+            "%s: %s | %s"
+            % (type(error).__name__, error, trace.strip().replace("\n", " | ")),
+        )
     except Exception:
         pass
 
@@ -133,14 +134,14 @@ def _run_app(recovery):
         from core.system import boot
 
         boot()
-        recovery.log('boot', 'app returned')
+        recovery.log("boot", "app returned")
 
     except Exception as error:
         _log_crash(recovery, error)
 
     except BaseException as error:
         # Ctrl-C (a tool connecting) or SystemExit: not a crash, but the end.
-        recovery.log('boot', 'interrupted: %s' % type(error).__name__)
+        recovery.log("boot", "interrupted: %s" % type(error).__name__)
 
 
 def launch():
@@ -159,7 +160,7 @@ def launch():
     import recovery
 
     cause = machine.reset_cause()
-    recovery.log('boot', 'start, reset cause %s' % _cause_name(cause))
+    recovery.log("boot", "start, reset cause %s" % _cause_name(cause))
     # The fork also reports a brownout as PWRON_RESET, so a box that browns
     # out in a loop clears its count each time and is never stuck (known gap).
     power_on = cause == machine.PWRON_RESET
@@ -167,10 +168,10 @@ def launch():
         action, reason = recovery.on_boot(power_on)
     except Exception as error:
         # Saving the boot count failed (flash full or broken): don't run blind.
-        recovery.log('boot', 'on_boot failed: %r' % (error,))
-        action, reason = 'stuck', 'boot check failed'
+        recovery.log("boot", "on_boot failed: %r" % (error,))
+        action, reason = "stuck", "boot check failed"
 
-    if action == 'stuck':
+    if action == "stuck":
         # Never reset from here: if recovery itself is what fails, a reset
         # would loop forever with no signal.
         recovery.stuck_forever(reason, rollback_trial=False)
@@ -179,7 +180,7 @@ def launch():
     dev = recovery.dev_mode()
     if dev:
         print("[BOOT] DEV MODE: watchdog and OTA off")
-        recovery.log('boot', 'DEV MODE: watchdog and OTA off')
+        recovery.log("boot", "DEV MODE: watchdog and OTA off")
     else:
         recovery.arm_watchdog()
 
