@@ -32,7 +32,9 @@ jobs:
           python-version: "3.12"
       - run: pip install ruff==0.17.6
       - run: ruff check .
-      - run: ruff format --check .
+      # Report format problems even when the check above failed.
+      - if: ${{ !cancelled() }}
+        run: ruff format --check .
 
   host-tests:
     runs-on: ubuntu-latest
