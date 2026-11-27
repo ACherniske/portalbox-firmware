@@ -101,6 +101,14 @@ def run():
                     assert status[other] == "OK", "%s is %r" % (other, status[other])
             patch.set(settings, flag, 1)
 
+    def test_off_but_set_up():
+        # The flag decides, even if the part is there (and the reader is set up).
+        for name, flag in _FLAGS:
+            patch.set(settings, flag, 0)
+            status = _device().get_status()
+            assert status[name] == "OFF", "%s off but set up: %r" % (name, status[name])
+            patch.set(settings, flag, 1)
+
     def test_enabled_missing_part_failed():
         for name, _ in _FLAGS:
             status = _device(**{name: None}).get_status()
@@ -136,6 +144,7 @@ def run():
     tests = [
         ("Every part present: OK", test_all_present_ok),
         ("Part turned off in settings: OFF", test_disabled_part_is_off),
+        ("Turned off but still set up: OFF", test_off_but_set_up),
         ("Part turned on but missing: FAILED", test_enabled_missing_part_failed),
         ("Card reader not initialized: FAILED", test_rfid_not_initialized_failed),
         ("Relay missing: FAILED, no state", test_relay_missing_failed),
