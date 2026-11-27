@@ -25,13 +25,13 @@ class _Patch:
 class FakeDevice:
     """Records relay calls; get_status() reports what the test sets."""
 
-    def __init__(self, rfid=True, relay=True):
+    def __init__(self, rfid="OK", relay="OK"):
         self.status = {
             "rfid": rfid,
             "relay": relay,
-            "led": True,
-            "buzzer": True,
-            "button": True,
+            "led": "OK",
+            "buzzer": "OK",
+            "button": "OK",
             "relay_state": False,
         }
         self.relay_on = True
@@ -114,20 +114,27 @@ def run():
         app._healthy()
 
     def test_healthy_marks():
-        healthy_with(True, True)
+        healthy_with("OK", "OK")
         assert marked == [1], "not marked healthy with working hardware"
 
     def test_no_rfid_not_healthy():
-        healthy_with(False, True)
+        healthy_with("FAILED", "OK")
         assert marked == [], "marked healthy without the card reader"
-        assert any(tag == "app" and "rfid" in msg for tag, msg in logged), (
+        assert any(tag == "app" and "rfid failed" in msg for tag, msg in logged), (
+            "no log: %r" % logged
+        )
+
+    def test_rfid_off_is_not_healthy():
+        healthy_with("OFF", "OK")
+        assert marked == [], "marked healthy with the card reader turned off"
+        assert any(tag == "app" and "rfid off" in msg for tag, msg in logged), (
             "no log: %r" % logged
         )
 
     def test_no_relay_not_healthy():
-        healthy_with(True, False)
+        healthy_with("OK", "FAILED")
         assert marked == [], "marked healthy without the relay"
-        assert any(tag == "app" and "relay" in msg for tag, msg in logged), (
+        assert any(tag == "app" and "relay failed" in msg for tag, msg in logged), (
             "no log: %r" % logged
         )
 
@@ -144,7 +151,7 @@ def run():
         async def no_loop(self, every_ms=0):
             pass
 
-        dev = FakeDevice(rfid=False)
+        dev = FakeDevice(rfid="FAILED")
         patch.set(app_main, "get_device", lambda: dev)
         patch.set(app_main, "DeviceFSM", FakeFSM)
         patch.set(app_main, "cleanup_device", lambda: None)
@@ -240,6 +247,7 @@ def run():
         ("main() never creates a device", test_main_no_device_creates_none),
         ("Healthy with reader and relay", test_healthy_marks),
         ("Not healthy without the card reader", test_no_rfid_not_healthy),
+        ("Not healthy with the card reader turned off", test_rfid_off_is_not_healthy),
         ("Not healthy without the relay", test_no_relay_not_healthy),
         ("FSM gets the hardware health check", test_fsm_gets_health_check),
         ("OTA loop survives a failed check", test_ota_loop_survives_error),
