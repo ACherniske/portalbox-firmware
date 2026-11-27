@@ -433,14 +433,17 @@ class Device:
         Get status of all hardware components.
 
         Returns:
-            dict: Status of each component
+            dict: "OK", "OFF" (turned off in settings) or "FAILED" (turned on
+            but not set up) for each part. The relay has no setting, so it is
+            "OK" or "FAILED"; "relay_state" is True, False or None (no relay).
         """
+        rfid_ready = self.rfid is not None and self.rfid.is_initialized
         return {
-            "buzzer": self.buzzer is not None,
-            "relay": self.relay is not None,
-            "rfid": self.rfid is not None and self.rfid.is_initialized,
-            "led": self.led is not None,
-            "button": self.button is not None,
+            "buzzer": _part_status(settings.ENABLE_BUZZER, self.buzzer is not None),
+            "relay": _part_status(True, self.relay is not None),
+            "rfid": _part_status(settings.ENABLE_RFID, rfid_ready),
+            "led": _part_status(settings.ENABLE_LEDS, self.led is not None),
+            "button": _part_status(settings.ENABLE_BUTTONS, self.button is not None),
             "relay_state": self.relay.state if self.relay else None,
         }
 
@@ -450,16 +453,23 @@ class Device:
 
         status = self.get_status()
 
-        for component, active in status.items():
+        for component, state in status.items():
             if component == "relay_state":
-                if active is not None:
-                    print(f"  Relay: {'ON' if active else 'OFF'}")
+                if state is not None:
+                    print(f"  Relay: {'ON' if state else 'OFF'}")
 
             else:
-                status_str = "OK" if active else "FAILED"
-                print(f"  {component.upper()}: {status_str}")
+                print(f"  {component.upper()}: {state}")
 
         print("=====================\n")
+
+
+def _part_status(enabled, ready):
+    """A part's state: OFF when turned off in settings, else OK or FAILED."""
+    if not enabled:
+        return "OFF"
+
+    return "OK" if ready else "FAILED"
 
 
 # Singleton instance of Device

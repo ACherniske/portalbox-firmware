@@ -294,7 +294,7 @@ def run():
 
         class WorkingDevice(_Anything):
             def get_status(self):
-                return {"rfid": True, "relay": True}
+                return {"rfid": "OK", "relay": "OK"}
 
         patch.set(app_main, "get_device", lambda: WorkingDevice())
         assert app_main.HEALTHY_AFTER_S == 60, (

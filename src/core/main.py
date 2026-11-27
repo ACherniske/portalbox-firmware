@@ -117,13 +117,18 @@ class Application:
 
     def _healthy(self):
         """Clear the crash count and commit a trial version, but only when
-        the card reader and relay started: a version that breaks them must
-        not be kept."""
+        the card reader and relay are "OK": a version that breaks them must
+        not be kept, and a card reader turned off in settings is not healthy
+        either. The states are strings, so compare; never test truthiness."""
         status = self.device.get_status()
-        failed = [name for name in _NEEDED_HARDWARE if not status.get(name)]
-        if failed:
-            recovery.log("app", "not healthy: %s failed" % ", ".join(failed))
-            print("[APP] Not healthy: %s failed" % ", ".join(failed))
+        bad = [
+            "%s %s" % (name, str(status.get(name)).lower())
+            for name in _NEEDED_HARDWARE
+            if status.get(name) != "OK"
+        ]
+        if bad:
+            recovery.log("app", "not healthy: %s" % ", ".join(bad))
+            print("[APP] Not healthy: %s" % ", ".join(bad))
             return
         recovery.mark_healthy()
         print("[APP] Healthy: crash count cleared")
